@@ -21,6 +21,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  double _autoRotateProgress = 0.0;
   final List<String> _videoIds = ['ePybIEu0TIU', '539nIqIOaCo', 'T8dcmRqDp2s'];
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
@@ -68,12 +69,16 @@ class _HomeScreenState extends State<HomeScreen> {
       initialVideoId: 'ePybIEu0TIU',
       flags: YoutubePlayerFlags(autoPlay: true, mute: false, loop: true),
     );
-    Timer.periodic(Duration(seconds: 5), (timer) {
+    Timer.periodic(Duration(milliseconds: 100), (timer) {
       if (_isAutoRotate && mounted) {
         setState(() {
-          _selectedHive = (_selectedHive + 1) % 3;
+          _autoRotateProgress += 0.1 / 10; // 10초 기준
+          if (_autoRotateProgress >= 1.0) {
+            _autoRotateProgress = 0.0;
+            _selectedHive = (_selectedHive + 1) % 3;
+            _youtubeController.load(_videoIds[_selectedHive]);
+          }
         });
-        _youtubeController.load(_videoIds[_selectedHive]);
       }
     });
   }
@@ -414,6 +419,27 @@ class _HomeScreenState extends State<HomeScreen> {
           showVideoProgressIndicator: true,
         ),
         SizedBox(height: 12),
+        if (_isAutoRotate)
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '다음 벌통까지...',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                SizedBox(height: 4),
+                LinearProgressIndicator(
+                  value: _autoRotateProgress,
+                  backgroundColor: Colors.grey[200],
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.amber),
+                  minHeight: 6,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ],
+            ),
+          ),
         Text(
           '벌통 ${hive['id']}번 모니터링',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
