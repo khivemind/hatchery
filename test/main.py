@@ -34,7 +34,7 @@ def post_alert(alert: Alert):
         data={
             'hive_id': str(alert.hive_id),
         },
-        token="cCvMVg8HRIOfTHGWnH9urg:APA91bGZH_BtWDS6u0nBYIT3f5yItL6BkkMUnN0npUk-RQSPMedF19f8p5_3i4w3qE7xdz42TjdPaTu9DYSz4eixt0wvZKQp4lwS_OedLIg7xSb6Gjp4v-w",
+        token="your token",
     )
     messaging.send(message)
 
