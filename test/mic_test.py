@@ -4,21 +4,25 @@ import requests
 import base64
 import wave
 import io
+import time
 from datetime import datetime
 
 # 설정
 SAMPLE_RATE = 22050
-DURATION = 1.5
+DURATION = 2.0          # 2초로 변경
 DEVICE_ID = 1
 COOLDOWN_TIME = 120
 
-SERVER_URL = "http://34.81.221.132:8000/v1/predict"  # 나중에 실제 서버로 변경
+SERVER_URL = "http://34.81.221.132:8000/v1/predict"
 API_KEY = "zerg-spore-sunken-7fK9xP2LmQ8vT3aR"
 HIVE_ID = "hive_1"
 
-last_alert_time = {}
+# FFT 임계치 설정
+FFT_LOW_HZ = 200
+FFT_HIGH_HZ = 300
+FFT_THRESHOLD = 500  # 이 값 이상이면 서버 전송 (조정 가능)
 
-import time
+last_alert_time = {}
 
 def should_send_alert(hive_id):
     now = time.time()
@@ -41,6 +45,21 @@ def record_audio():
     sd.wait()
     return audio
 
+def check_fft_threshold(audio):
+    # FFT 계산
+    fft_result = np.fft.rfft(audio.flatten())
+    fft_magnitude = np.abs(fft_result)
+    freqs = np.fft.rfftfreq(len(audio.flatten()), d=1/SAMPLE_RATE)
+
+    # 200~300Hz 구간 추출
+    target_range = (freqs >= FFT_LOW_HZ) & (freqs <= FFT_HIGH_HZ)
+    target_magnitude = fft_magnitude[target_range]
+
+    max_magnitude = np.max(target_magnitude) if len(target_magnitude) > 0 else 0
+    print(f"📊 {FFT_LOW_HZ}~{FFT_HIGH_HZ}Hz 최대 진폭: {max_magnitude:.1f} (임계치: {FFT_THRESHOLD})")
+
+    return max_magnitude >= FFT_THRESHOLD
+
 def audio_to_base64(audio):
     buffer = io.BytesIO()
     with wave.open(buffer, 'wb') as wf:
@@ -56,9 +75,16 @@ print("-" * 40)
 
 while True:
     audio = record_audio()
-    wav_base64 = audio_to_base64(audio)
+
+    # FFT 임계치 체크 → 넘을 때만 서버 전송
+    if not check_fft_threshold(audio):
+        print("✅ 정상 범위 - 전송 안 함")
+        continue
+
+    print("⚠️ 임계치 초과 - 서버 전송 중...")
 
     if should_send_alert(HIVE_ID):
+        wav_base64 = audio_to_base64(audio)
         try:
             response = requests.post(
                 SERVER_URL,
@@ -70,14 +96,12 @@ while True:
                 }
             )
             print(f"상태코드: {response.status_code}")
-            print(f"응답 내용: {response.text}")
             data = response.json()
 
             if data.get("status") == 200:
                 prediction = data.get("prediction", {})
                 label = prediction.get("label", "unknown")
                 confidence = prediction.get("confidence", 0)
-
                 print(f"판단: {label} | 확률: {confidence*100:.1f}%")
 
                 if label == "hornet":
