@@ -18,3 +18,18 @@ Phase 8.1	settings_screen 개편 + 다크모드 토글	4/13	4/13	✅
 Phase 9	라즈베리파이 연동	4/14~4/16	-	⏳
 Phase 10	프론트 디자인 최종 적용	4/17~4/19	-	⏳
 Phase 11	최종 마무리 및 발표 준비	4/20~4/23	-	⏳
+
+📋 오늘 한 것 (4/14)
+벌통 서버 연동
+
+api_service.dart — registerDevice, unregisterDevice, updateDevice, getDevices 함수 추가
+settings_screen.dart — 벌통 수정 다이얼로그 + ✏️ 수정 버튼 추가
+벌통 추가/수정/삭제 시 서버 자동 호출 연동
+GET /v1/devices?user_id=khivemind — 앱 시작 시 서버에서 벌통 목록 불러오기
+main.dart — _loadDevices() 추가
+Firebase 교체
+
+google-services.json → 서버 팀 프로젝트(overlord-5076b)로 교체
+firebase_options.dart → 새 프로젝트 값으로 교체
+Firebase 중복 초기화 에러 수정 (try-catch 처리)
+미해결
