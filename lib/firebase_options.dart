@@ -41,46 +41,49 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyDVUk3UrAAqTLhVEiCmGe4NvCeDOuoXj50',
-    appId: '1:141560742872:web:45b84501c8e7d9e41228ad',
-    messagingSenderId: '141560742872',
-    projectId: 'hivemind-9a13f',
-    authDomain: 'hivemind-9a13f.firebaseapp.com',
-    storageBucket: 'hivemind-9a13f.firebasestorage.app',
+    apiKey: 'AIzaSyAcp9GXSU_KcUopPk4jrNuG4y_jJcUOhJg',
+    appId: '1:457959018224:web:40a87501936a18efb77c35',
+    messagingSenderId: '457959018224',
+    projectId: 'overlord-5076b',
+    authDomain: 'overlord-5076b.firebaseapp.com',
+    storageBucket: 'overlord-5076b.firebasestorage.app',
+    measurementId: 'G-S725JPVCQJ',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyCmu5LY11_LLJtlnNlkEaHASdda0JiDZlE',
-    appId: '1:141560742872:android:8d7fe39cfac7a9891228ad',
-    messagingSenderId: '141560742872',
-    projectId: 'hivemind-9a13f',
-    storageBucket: 'hivemind-9a13f.firebasestorage.app',
+    apiKey: 'AIzaSyBgCE0rZoPBqW9PoQjhB8iIWxD2hhYB2q8',
+    appId: '1:457959018224:android:c6dda81d77b163e1b77c35',
+    messagingSenderId: '457959018224',
+    projectId: 'overlord-5076b',
+    storageBucket: 'overlord-5076b.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyCbq7R2xqQXkeCnSlxCXRo_fWPNElFavM8',
-    appId: '1:141560742872:ios:6dc33f9832e9056d1228ad',
-    messagingSenderId: '141560742872',
-    projectId: 'hivemind-9a13f',
-    storageBucket: 'hivemind-9a13f.firebasestorage.app',
+    apiKey: 'AIzaSyBc-tjqnPmCTPxaY3hhnfYR1Z4zpoY67A4',
+    appId: '1:457959018224:ios:1bb487eec4a97c8cb77c35',
+    messagingSenderId: '457959018224',
+    projectId: 'overlord-5076b',
+    storageBucket: 'overlord-5076b.firebasestorage.app',
     iosBundleId: 'com.example.hivemindApp',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyCbq7R2xqQXkeCnSlxCXRo_fWPNElFavM8',
-    appId: '1:141560742872:ios:6dc33f9832e9056d1228ad',
-    messagingSenderId: '141560742872',
-    projectId: 'hivemind-9a13f',
-    storageBucket: 'hivemind-9a13f.firebasestorage.app',
+    apiKey: 'AIzaSyBc-tjqnPmCTPxaY3hhnfYR1Z4zpoY67A4',
+    appId: '1:457959018224:ios:1bb487eec4a97c8cb77c35',
+    messagingSenderId: '457959018224',
+    projectId: 'overlord-5076b',
+    storageBucket: 'overlord-5076b.firebasestorage.app',
     iosBundleId: 'com.example.hivemindApp',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyDVUk3UrAAqTLhVEiCmGe4NvCeDOuoXj50',
-    appId: '1:141560742872:web:007b72cd98a9e1401228ad',
-    messagingSenderId: '141560742872',
-    projectId: 'hivemind-9a13f',
-    authDomain: 'hivemind-9a13f.firebaseapp.com',
-    storageBucket: 'hivemind-9a13f.firebasestorage.app',
+    apiKey: 'AIzaSyAcp9GXSU_KcUopPk4jrNuG4y_jJcUOhJg',
+    appId: '1:457959018224:web:54b83e2842e1096db77c35',
+    messagingSenderId: '457959018224',
+    projectId: 'overlord-5076b',
+    authDomain: 'overlord-5076b.firebaseapp.com',
+    storageBucket: 'overlord-5076b.firebasestorage.app',
+    measurementId: 'G-87TP81DKNV',
   );
+
 }

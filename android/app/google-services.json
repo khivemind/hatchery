@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "141560742872",
-    "project_id": "hivemind-9a13f",
-    "storage_bucket": "hivemind-9a13f.firebasestorage.app"
+    "project_number": "457959018224",
+    "project_id": "overlord-5076b",
+    "storage_bucket": "overlord-5076b.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:141560742872:android:8d7fe39cfac7a9891228ad",
+        "mobilesdk_app_id": "1:457959018224:android:c6dda81d77b163e1b77c35",
         "android_client_info": {
           "package_name": "com.example.hivemind_app"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCmu5LY11_LLJtlnNlkEaHASdda0JiDZlE"
+          "current_key": "AIzaSyBgCE0rZoPBqW9PoQjhB8iIWxD2hhYB2q8"
         }
       ],
       "services": {
