@@ -27,7 +27,10 @@ environment:
 # dependencies can be manually updated by changing the version numbers below to
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
+
 dependencies:
+  flutter_launcher_icons: ^0.13.1
+  flutter_vlc_player: ^7.4.1
   youtube_player_flutter: ^9.0.2
   video_player: ^2.8.0
   flutter_local_notifications: ^18.0.0
@@ -45,6 +48,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+  flutter_launcher_icons: ^0.13.1
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
@@ -56,6 +60,14 @@ dev_dependencies:
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#F8F6F0"  # 크림색으로 배경 채우기
+  adaptive_icon_foreground: "assets/icon/app_icon.png"
+  min_sdk_android: 21
+ 
 flutter:
 
   # The following line ensures that the Material Icons font is
@@ -65,6 +77,7 @@ flutter:
   assets:
     - assets/images/bee_normal.png
     - assets/images/bee_alert.png
+    - assets/icon/app_icon.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

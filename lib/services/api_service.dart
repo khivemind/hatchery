@@ -10,10 +10,7 @@ class ApiService {
   Future<Map<String, dynamic>> predict(int hiveId, String wavBase64) async {
     final response = await http.post(
       Uri.parse('$baseUrl/v1/predict'),
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': Config.apiKey,
-      },
+      headers: {'Content-Type': 'application/json', 'x-api-key': Config.apiKey},
       body: jsonEncode({
         'id': hiveId.toString(),
         'event_time': DateTime.now().toIso8601String(),
@@ -32,8 +29,9 @@ class ApiService {
   // GET /v1/devices → _groups 구조로 변환해서 반환
   Future<List<Map<String, dynamic>>> getDevices() async {
     try {
-      final uri = Uri.parse('$baseUrl/v1/devices')
-          .replace(queryParameters: {'user_id': 'khivemind'});
+      final uri = Uri.parse(
+        '$baseUrl/v1/devices',
+      ).replace(queryParameters: {'user_id': 'khivemind'});
       final response = await http.get(
         uri,
         headers: {'x-api-key': Config.apiKey},
@@ -62,6 +60,7 @@ class ApiService {
           'humidity': 60.0,
           'lastDetected': null,
           'logs': [],
+          'predictionImageUrl': '',
         });
       }
 
@@ -80,7 +79,7 @@ class ApiService {
   Future<bool> registerDevice({
     required String deviceId,
     required String userId,
-    required String appToken,
+    String? appToken,
     required String deviceName,
     required String group,
   }) async {
@@ -116,9 +115,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'x-api-key': Config.apiKey,
         },
-        body: jsonEncode({
-          'device_id': deviceId,
-        }),
+        body: jsonEncode({'device_id': deviceId}),
       );
       return response.statusCode == 200;
     } catch (e) {
@@ -133,6 +130,7 @@ class ApiService {
     required String deviceId,
     required String deviceName,
     required String group,
+    String? appToken,
   }) async {
     try {
       final response = await http.post(
@@ -145,6 +143,7 @@ class ApiService {
           'device_id': deviceId,
           'device_name': deviceName,
           'group': group,
+          if (appToken != null) 'app_token': appToken,
         }),
       );
       return response.statusCode == 200;

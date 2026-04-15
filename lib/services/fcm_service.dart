@@ -30,19 +30,6 @@ class FcmService {
     }
     print('[FCM] 토큰: $token');
 
-    // 3. 서버에 등록
-    await _registerDevice(deviceId: deviceId, appToken: token);
-
-    // 4. 토큰 갱신 시 자동 재등록
-    _fcm.onTokenRefresh.listen((newToken) {
-      _registerDevice(deviceId: deviceId, appToken: newToken);
-    });
-
-    // 5. 포그라운드 메시지 수신
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print('[FCM] 포그라운드 메시지: ${message.notification?.title}');
-      // TODO: 앱 내 알림 UI 표시 (예: flutter_local_notifications)
-    });
 
     // 6. 알림 클릭 시 (백그라운드 → 앱 열기)
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
@@ -59,14 +46,15 @@ class FcmService {
   }) async {
     try {
       final response = await http.post(
-        Uri.parse('$_serverUrl/v1/register-device').replace(
-          queryParameters: {
-            'device_id': deviceId,
-            'user_id': deviceId, // 지금은 device_id = user_id
-            'app_token': appToken,
-            'device_name': '벌통 $deviceId',
-          },
-        ),
+        Uri.parse('$_serverUrl/v1/register-device'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'device_id': deviceId,
+          'user_id': 'khivemind',
+          'app_token': appToken,
+          'device_name': '벌통 $deviceId',
+          'group': 'khivemind',
+        }),
       );
 
       if (response.statusCode == 200) {

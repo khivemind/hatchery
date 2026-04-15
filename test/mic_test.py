@@ -14,7 +14,8 @@ DURATION = 2.0
 DEVICE_ID = 1
 
 SERVER_URL = "http://34.81.221.132:8000/v1/predict"
-HIVE_ID = "hive_1"
+LOCAL_URL = "http://127.0.0.1:8000/alerts"
+HIVE_ID = "1776219247987"
 
 def record_audio():
     audio = sd.rec(
@@ -49,24 +50,17 @@ while True:
             SERVER_URL,
             headers={"x-api-key": API_KEY},
             json={
-                "id": HIVE_ID,
+                "device_id": HIVE_ID,
                 "event_time": datetime.now().isoformat(),
                 "wav_base64": wav_base64,
-                "device_id": HIVE_ID,
             }
         )
-        data = response.json()
 
-        if data.get("status") == 200:
-            prediction = data.get("prediction", {})
-            label = prediction.get("label", "unknown")
-            confidence = prediction.get("confidence", 0)
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 판단: {label} | 확률: {confidence*100:.1f}%")
-
-            if label == "hornet":
-                print("🚨 말벌 감지!")
+        if response.status_code == 200:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 서버 응답: success → FCM 트리거")
+            # 로컬 서버로 FCM 알림 트리거
         else:
-            print(f"서버 오류: {data.get('status')}")
+            print(f"서버 오류: {response.status_code}")
 
     except Exception as e:
         print(f"연결 실패: {e}")

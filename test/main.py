@@ -8,7 +8,7 @@ app = FastAPI()
 alerts = []
 
 # Firebase Admin 초기화
-cred = credentials.Certificate("hivemind-9a13f-firebase-adminsdk-fbsvc-3cc3e178cf.json")
+cred = credentials.Certificate("hivemind-9a13f-firebase-adminsdk-fbsvc-a1a60d1013.json")
 firebase_admin.initialize_app(cred)
 
 class Alert(BaseModel):
@@ -34,7 +34,7 @@ def post_alert(alert: Alert):
         data={
             'hive_id': str(alert.hive_id),
         },
-        token="your token",
+        token="cCvMVg8HRIOfTHGWnH9urg:APA91bGZH_BtWDS6u0nBYIT3f5yItL6BkkMUnN0npUk-RQSPMedF19f8p5_3i4w3qE7xdz42TjdPaTu9DYSz4eixt0wvZKQp4lwS_OedLIg7xSb6Gjp4v-w",
     )
     messaging.send(message)
 

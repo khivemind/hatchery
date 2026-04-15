@@ -11,6 +11,7 @@ import 'package:flutter_vlc_player/flutter_vlc_player.dart';
 import 'package:http/http.dart' as http;
 import 'services/config.dart';
 import 'services/fcm_service.dart';
+import 'splash_screen.dart';
 
 const kCream = Color(0xFFF8F6F0);
 const kGold = Color(0xFFE8A820);
@@ -35,9 +36,7 @@ void main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-  } catch (e) {
-    // 이미 초기화된 경우 무시
-  }
+  } catch (e) {}
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   runApp(HivemindApp());
 }
@@ -45,7 +44,16 @@ void main() async {
 class HivemindApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(theme: ThemeData.light(), home: HomeScreen());
+    return MaterialApp(
+      theme: ThemeData.light(),
+      home: SplashScreen(nextScreen: HomeScreen()),
+      builder: (context, child) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaleFactor: 1.15),
+          child: child!,
+        );
+      },
+    );
   }
 }
 
@@ -62,7 +70,6 @@ class _HomeScreenState extends State<HomeScreen> {
   int _selectedHiveIndex = 0;
   bool _showDetailScreen = false;
 
-  // 그루핑 데이터 구조
   List<Map<String, dynamic>> _groups = [];
 
   Map<String, dynamic>? get _currentHive {
@@ -95,6 +102,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initNotifications() async {
+    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+      print('FCM 토큰 갱신: $newToken');
+      for (int gi = 0; gi < _groups.length; gi++) {
+        final hives = _groups[gi]['hives'] as List;
+        for (final hive in hives) {
+          await ApiService().registerDevice(
+            deviceId: hive['id'].toString(),
+            userId: 'khivemind',
+            appToken: newToken,
+            deviceName: hive['name'] as String,
+            group: _groups[gi]['name'] as String,
+          );
+          print('토큰 재등록 완료: ${hive['id']}');
+        }
+      }
+    });
+    await fcmService.init('khivemind');
     await FirebaseMessaging.instance
         .setForegroundNotificationPresentationOptions(
           alert: true,
@@ -111,15 +135,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-      final hiveId = int.tryParse(message.data['hive_id'] ?? '1') ?? 1;
+      print('FCM 수신 데이터: ${message.data}');
+      print('FCM 알림: ${message.notification?.title}');
+      final deviceId = message.data['device_id'] ?? '';
       final confidence =
           double.tryParse(message.data['confidence'] ?? '0') ?? 0.0;
+      final imageUrl = message.data['image_url'] ?? '';
 
-      // 모든 구역에서 해당 hive_id 찾기
       for (int gi = 0; gi < _groups.length; gi++) {
         final hives = _groups[gi]['hives'] as List;
         for (int hi = 0; hi < hives.length; hi++) {
-          if (hives[hi]['id'] == hiveId) {
+          hives[hi]['predictionImageUrl'] = imageUrl;
+          if (hives[hi]['id'].toString() == message.data['device_id']) {
             setState(() {
               hives[hi]['isAlert'] = true;
               hives[hi]['confidence'] = confidence;
@@ -142,10 +169,10 @@ class _HomeScreenState extends State<HomeScreen> {
       await _localNotifications.show(
         0,
         '말벌 침입 감지!',
-        '벌통 $hiveId | 신뢰도 ${(confidence * 100).toStringAsFixed(1)}%',
+        '벌통 $deviceId | 신뢰도 ${(confidence * 100).toStringAsFixed(1)}%',
         NotificationDetails(
           android: AndroidNotificationDetails(
-            'hivemind_channel',
+            'hornet_alert',
             '말벌 감지 알림',
             importance: Importance.max,
             priority: Priority.high,
@@ -164,6 +191,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (diff.inMinutes < 60) return '${diff.inMinutes}분 전';
     if (diff.inHours < 24) return '${diff.inHours}시간 전';
     return '${diff.inDays}일 전';
+  }
+
+  String _formatLogTime(DateTime? dt) {
+    if (dt == null) return '-';
+    return '${dt.month}/${dt.day} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
   String _tempStatus(double t) {
@@ -196,7 +228,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ───────────────────────── 메인 화면 ─────────────────────────
   Widget _buildMainScreen() {
     final hive = _currentHive;
     return Stack(
@@ -255,12 +286,12 @@ class _HomeScreenState extends State<HomeScreen> {
             SizedBox(height: 16),
             Text(
               '구역을 추가해주세요',
-              style: TextStyle(fontSize: 14, color: kMutedGold),
+              style: TextStyle(fontSize: 16, color: kMutedGold),
             ),
             SizedBox(height: 8),
             Text(
               '탭하여 설정으로 이동',
-              style: TextStyle(fontSize: 12, color: kLightBorder),
+              style: TextStyle(fontSize: 14, color: kLightBorder),
             ),
           ],
         ),
@@ -275,18 +306,17 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Icon(Icons.hive_outlined, size: 48, color: kMutedGold),
           SizedBox(height: 16),
-          Text('벌통을 추가해주세요', style: TextStyle(fontSize: 14, color: kMutedGold)),
+          Text('벌통을 추가해주세요', style: TextStyle(fontSize: 16, color: kMutedGold)),
           SizedBox(height: 8),
           Text(
             '설정에서 이 구역에 벌통을 추가할 수 있어요',
-            style: TextStyle(fontSize: 12, color: kLightBorder),
+            style: TextStyle(fontSize: 14, color: kLightBorder),
           ),
         ],
       ),
     );
   }
 
-  // ───────────────────────── 앱바 ─────────────────────────
   Widget _buildAppBar() {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -305,7 +335,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 'HIVEMIND',
                 style: TextStyle(
                   fontFamily: 'Georgia',
-                  fontSize: 16,
+                  fontSize: 18,
                   letterSpacing: 3,
                   color: kDarkBrown,
                   fontWeight: FontWeight.normal,
@@ -341,7 +371,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: kLightBorder, width: 0.5),
               ),
-              child: Icon(Icons.settings_outlined, size: 16, color: kMutedGold),
+              child: Icon(Icons.settings_outlined, size: 18, color: kMutedGold),
             ),
           ),
         ],
@@ -349,7 +379,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ───────────────────────── 구역 탭 ─────────────────────────
   Widget _buildGroupTabs() {
     return Container(
       padding: EdgeInsets.fromLTRB(14, 10, 14, 0),
@@ -390,7 +419,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   group['name'],
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 14,
                     fontWeight: FontWeight.w500,
                     color: hasAlert ? kRed : kDarkBrown,
                   ),
@@ -403,7 +432,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ───────────────────────── 벌통 탭 ─────────────────────────
   Widget _buildHiveTabs() {
     final hives = _currentHives;
     if (hives.isEmpty) {
@@ -411,7 +439,7 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: EdgeInsets.all(14),
         child: Text(
           '벌통을 추가해주세요',
-          style: TextStyle(fontSize: 12, color: kMutedGold),
+          style: TextStyle(fontSize: 14, color: kMutedGold),
         ),
       );
     }
@@ -451,7 +479,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     Text(
                       hive['name'],
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: 13,
                         fontWeight: FontWeight.w500,
                         color: isAlert ? kRed : kDarkBrown,
                       ),
@@ -460,7 +488,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     Text(
                       isAlert ? '감지 →' : '정상',
                       style: TextStyle(
-                        fontSize: 9,
+                        fontSize: 11,
                         color: isAlert ? Color(0xFFE57373) : kMutedGold,
                       ),
                     ),
@@ -474,7 +502,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ───────────────────────── 모니터 ─────────────────────────
   Widget _buildMonitor(Map<String, dynamic> hive) {
     final cctvUrl = (hive['cctvUrl'] as String?) ?? '';
 
@@ -492,7 +519,6 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(14),
         child: Stack(
           children: [
-            // CCTV URL 있으면 VLC 플레이어, 없으면 플레이스홀더
             cctvUrl.isNotEmpty
                 ? SizedBox.expand(
                     child: FittedBox(
@@ -526,7 +552,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             'CCTV 미연결',
                             style: TextStyle(
                               color: kMutedGold,
-                              fontSize: 11,
+                              fontSize: 13,
                               letterSpacing: 1,
                             ),
                           ),
@@ -553,7 +579,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Text(
                     cctvUrl.isNotEmpty ? 'LIVE' : 'NO SIGNAL',
                     style: TextStyle(
-                      fontSize: 8,
+                      fontSize: 10,
                       color: kGold,
                       letterSpacing: 1,
                     ),
@@ -567,7 +593,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Text(
                 '${hive['name']} CAM',
                 style: TextStyle(
-                  fontSize: 8,
+                  fontSize: 10,
                   color: kMutedGold,
                   letterSpacing: 1,
                 ),
@@ -579,7 +605,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ───────────────────────── 상태 카드 ─────────────────────────
   Widget _buildStatusCards(Map<String, dynamic> hive) {
     final isAlert = hive['isAlert'] as bool;
     final isDoorOpen = hive['isDoorOpen'] as bool;
@@ -592,7 +617,7 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         Text(
           '${hive['name']} 상태',
-          style: TextStyle(fontSize: 10, color: kMutedGold, letterSpacing: 1),
+          style: TextStyle(fontSize: 12, color: kMutedGold, letterSpacing: 1),
         ),
         SizedBox(height: 6),
         Row(
@@ -640,13 +665,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         Text(
                           '소문 상태',
-                          style: TextStyle(fontSize: 9, color: kMutedGold),
+                          style: TextStyle(fontSize: 11, color: kMutedGold),
                         ),
                         Row(
                           children: [
                             Text(
                               hiveIsAutoMode ? '자동' : '수동',
-                              style: TextStyle(fontSize: 8, color: kMutedGold),
+                              style: TextStyle(fontSize: 10, color: kMutedGold),
                             ),
                             SizedBox(width: 4),
                             Transform.scale(
@@ -694,7 +719,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Text(
                             isDoorOpen ? '열림' : '닫힘',
                             style: TextStyle(
-                              fontSize: 16,
+                              fontSize: 18,
                               fontWeight: FontWeight.w500,
                               color: isDoorOpen ? Color(0xFF4CAF50) : kRed,
                             ),
@@ -703,7 +728,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Text(
                             hiveIsAutoMode ? '자동 모드' : '탭하여 변경',
                             style: TextStyle(
-                              fontSize: 8,
+                              fontSize: 10,
                               color: hiveIsAutoMode ? kMutedGold : kGold,
                             ),
                           ),
@@ -720,7 +745,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 label: '마지막 감지',
                 value: _timeAgo(hive['lastDetected']),
                 status: hive['confidence'] > 0
-                    ? '신뢰도 ${(hive['confidence'] * 100).toStringAsFixed(0)}%'
+                    ? '탐지율 ${(hive['confidence'] * 100).toStringAsFixed(0)}%'
                     : '이상 없음',
                 statusColor: isAlert ? Color(0xFFE57373) : kMutedGold,
                 isAlert: isAlert,
@@ -752,12 +777,12 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(fontSize: 9, color: kMutedGold)),
+          Text(label, style: TextStyle(fontSize: 11, color: kMutedGold)),
           SizedBox(height: 3),
           Text(
             value,
             style: TextStyle(
-              fontSize: 20,
+              fontSize: 22,
               fontWeight: FontWeight.w500,
               color: kDarkBrown,
             ),
@@ -777,7 +802,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Expanded(
                 child: Text(
                   status,
-                  style: TextStyle(fontSize: 8, color: statusColor),
+                  style: TextStyle(fontSize: 10, color: statusColor),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -788,7 +813,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ───────────────────────── 탐지 로그 ─────────────────────────
   Widget _buildTodayLogs(Map<String, dynamic> hive) {
     final logs = hive['logs'] as List;
     return Column(
@@ -800,7 +824,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Text(
               '오늘 탐지 현황',
               style: TextStyle(
-                fontSize: 10,
+                fontSize: 12,
                 color: kMutedGold,
                 letterSpacing: 1,
               ),
@@ -808,7 +832,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Text(
               '${logs.length}회',
               style: TextStyle(
-                fontSize: 10,
+                fontSize: 12,
                 color: kRed,
                 fontWeight: FontWeight.w500,
               ),
@@ -829,7 +853,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     padding: EdgeInsets.symmetric(vertical: 8),
                     child: Text(
                       '탐지 기록 없음',
-                      style: TextStyle(fontSize: 11, color: kMutedGold),
+                      style: TextStyle(fontSize: 13, color: kMutedGold),
                     ),
                   ),
                 )
@@ -852,18 +876,18 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                               SizedBox(width: 6),
                               Text(
-                                _timeAgo(log['time']),
+                                _formatLogTime(log['time']),
                                 style: TextStyle(
-                                  fontSize: 10,
+                                  fontSize: 13,
                                   color: kDarkBrown,
                                 ),
                               ),
                             ],
                           ),
                           Text(
-                            '${(log['confidence'] * 100).toStringAsFixed(0)}%',
+                            '탐지율 : ${(log['confidence'] * 100).toStringAsFixed(0)}%',
                             style: TextStyle(
-                              fontSize: 10,
+                              fontSize: 13,
                               color: Color(0xFFE57373),
                             ),
                           ),
@@ -877,47 +901,52 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ───────────────────────── 감지 배너 ─────────────────────────
   Widget _buildAlertBanner(Map<String, dynamic> hive) {
     return Positioned(
       top: 0,
       left: 0,
       right: 0,
-      child: Container(
-        color: kRed,
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            _showDetailScreen = true;
+          });
+        },
+        child: Container(
+          color: kRed,
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                ),
               ),
-            ),
-            SizedBox(width: 8),
-            Text(
-              '${hive['name']} — 말벌 침입 감지',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                letterSpacing: 0.5,
+              SizedBox(width: 8),
+              Text(
+                '${hive['name']} — 말벌 침입 감지',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: 0.5,
+                ),
               ),
-            ),
-            Spacer(),
-            Text(
-              '${(hive['confidence'] * 100).toStringAsFixed(0)}%',
-              style: TextStyle(color: Color(0xFFFFCDD2), fontSize: 11),
-            ),
-          ],
+              Spacer(),
+              Text(
+                '${(hive['confidence'] * 100).toStringAsFixed(0)}%',
+                style: TextStyle(color: Color(0xFFFFCDD2), fontSize: 13),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  // ───────────────────────── AI 예측 결과 ─────────────────────────
   Widget _buildDetailScreen(Map<String, dynamic> hive) {
     return Column(
       children: [
@@ -951,7 +980,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 'AI 예측 결과',
                 style: TextStyle(
                   fontFamily: 'Georgia',
-                  fontSize: 14,
+                  fontSize: 16,
                   letterSpacing: 1,
                   color: kDarkBrown,
                   fontWeight: FontWeight.normal,
@@ -966,7 +995,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Text(
                   '말벌 감지',
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 12,
                     color: Colors.white,
                     letterSpacing: 0.5,
                   ),
@@ -981,7 +1010,6 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 감지 정보
                 Container(
                   padding: EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -997,7 +1025,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           Text(
                             '감지 시각',
-                            style: TextStyle(fontSize: 9, color: kMutedGold),
+                            style: TextStyle(fontSize: 11, color: kMutedGold),
                           ),
                           SizedBox(height: 2),
                           Text(
@@ -1008,7 +1036,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   )
                                 : '-',
                             style: TextStyle(
-                              fontSize: 11,
+                              fontSize: 13,
                               fontWeight: FontWeight.w500,
                               color: kRed,
                             ),
@@ -1020,13 +1048,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           Text(
                             '신뢰도',
-                            style: TextStyle(fontSize: 9, color: kMutedGold),
+                            style: TextStyle(fontSize: 11, color: kMutedGold),
                           ),
                           SizedBox(height: 2),
                           Text(
                             '${(hive['confidence'] * 100).toStringAsFixed(0)}%',
                             style: TextStyle(
-                              fontSize: 22,
+                              fontSize: 24,
                               fontWeight: FontWeight.w500,
                               color: kRed,
                             ),
@@ -1037,45 +1065,89 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 SizedBox(height: 14),
-                _graphLabel('WAVEFORM'),
+                _graphLabel('AI 분석 이미지'),
                 SizedBox(height: 6),
-                Container(
-                  height: 110,
-                  decoration: BoxDecoration(
-                    color: kDarkBrown,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: CustomPaint(
-                    size: Size.infinite,
-                    painter: WaveformPainter(),
-                  ),
-                ),
+                (hive['predictionImageUrl'] as String? ?? '').isNotEmpty
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.network(
+                          hive['predictionImageUrl'],
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, progress) {
+                            if (progress == null) return child;
+                            return Container(
+                              height: 200,
+                              color: kDarkBrown,
+                              child: Center(
+                                child: CircularProgressIndicator(color: kGold),
+                              ),
+                            );
+                          },
+                          errorBuilder: (context, error, stack) => Container(
+                            height: 200,
+                            decoration: BoxDecoration(
+                              color: kDarkBrown,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '이미지를 불러올 수 없어요',
+                                style: TextStyle(
+                                  color: kMutedGold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
+                    : Container(
+                        height: 200,
+                        decoration: BoxDecoration(
+                          color: kDarkBrown,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Center(
+                          child: Text(
+                            '분석 이미지 없음',
+                            style: TextStyle(color: kMutedGold, fontSize: 14),
+                          ),
+                        ),
+                      ),
                 SizedBox(height: 12),
-                _graphLabel('FFT'),
-                SizedBox(height: 6),
-                Container(
-                  height: 110,
-                  decoration: BoxDecoration(
-                    color: kDarkBrown,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: CustomPaint(
-                    size: Size.infinite,
-                    painter: FFTPainter(),
-                  ),
-                ),
-                SizedBox(height: 12),
-                _graphLabel('SPECTROGRAM'),
-                SizedBox(height: 6),
-                Container(
-                  height: 110,
-                  decoration: BoxDecoration(
-                    color: kDarkBrown,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: CustomPaint(
-                    size: Size.infinite,
-                    painter: SpectrogramPainter(),
+                GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      final hives =
+                          _groups[_selectedGroupIndex]['hives'] as List;
+                      hives[_selectedHiveIndex]['isAlert'] = false;
+                      hives[_selectedHiveIndex]['confidence'] = 0.0;
+                      if (hives[_selectedHiveIndex]['isAutoMode'] == true) {
+                        hives[_selectedHiveIndex]['isDoorOpen'] = true;
+                      }
+                      _showDetailScreen = false;
+                    });
+                  },
+                  child: Container(
+                    width: double.infinity,
+                    padding: EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: kDarkBrown,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: kGold, width: 0.8),
+                    ),
+                    child: Text(
+                      '조치 완료',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontFamily: 'Georgia',
+                        fontSize: 16,
+                        letterSpacing: 2,
+                        color: kGold,
+                        fontWeight: FontWeight.normal,
+                      ),
+                    ),
                   ),
                 ),
                 SizedBox(height: 12),
@@ -1090,7 +1162,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _graphLabel(String label) {
     return Text(
       label,
-      style: TextStyle(fontSize: 10, color: kMutedGold, letterSpacing: 1.5),
+      style: TextStyle(fontSize: 12, color: kMutedGold, letterSpacing: 1.5),
     );
   }
 
@@ -1100,7 +1172,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ───────────────────────── 페인터들 ─────────────────────────
 class HexLogoPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
