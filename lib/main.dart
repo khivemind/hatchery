@@ -101,6 +101,55 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _handleFcmMessage(RemoteMessage message) async {
+    print('FCM 수신 데이터: ${message.data}');
+    print('FCM 알림: ${message.notification?.title}');
+    final deviceId = message.data['device_id'] ?? '';
+    final confidence =
+        double.tryParse(message.data['confidence'] ?? '0') ?? 0.0;
+    final imageUrl = message.data['image_url'] ?? '';
+
+    for (int gi = 0; gi < _groups.length; gi++) {
+      final hives = _groups[gi]['hives'] as List;
+      for (int hi = 0; hi < hives.length; hi++) {
+        hives[hi]['predictionImageUrl'] = imageUrl;
+        if (hives[hi]['id'].toString() == message.data['device_id']) {
+          setState(() {
+            hives[hi]['isAlert'] = true;
+            hives[hi]['confidence'] = confidence;
+            hives[hi]['lastDetected'] = DateTime.now();
+            hives[hi]['logs'].add({
+              'time': DateTime.now(),
+              'confidence': confidence,
+            });
+            _selectedGroupIndex = gi;
+            _selectedHiveIndex = hi;
+            _showDetailScreen = true;
+            if (hives[hi]['isAutoMode'] == true)
+              hives[hi]['isDoorOpen'] = false;
+          });
+          break;
+        }
+      }
+    }
+
+    await _localNotifications.show(
+      0,
+      '말벌 침입 감지!',
+      '벌통 $deviceId | 신뢰도 ${(confidence * 100).toStringAsFixed(1)}%',
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          'hornet_alert',
+          '말벌 감지 알림',
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
+        ),
+      ),
+    );
+  }
+
   Future<void> _initNotifications() async {
     FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
       print('FCM 토큰 갱신: $newToken');
@@ -134,53 +183,12 @@ class _HomeScreenState extends State<HomeScreen> {
       InitializationSettings(android: androidSettings),
     );
 
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-      print('FCM 수신 데이터: ${message.data}');
-      print('FCM 알림: ${message.notification?.title}');
-      final deviceId = message.data['device_id'] ?? '';
-      final confidence =
-          double.tryParse(message.data['confidence'] ?? '0') ?? 0.0;
-      final imageUrl = message.data['image_url'] ?? '';
+    FirebaseMessaging.onMessage.listen(_handleFcmMessage);
 
-      for (int gi = 0; gi < _groups.length; gi++) {
-        final hives = _groups[gi]['hives'] as List;
-        for (int hi = 0; hi < hives.length; hi++) {
-          hives[hi]['predictionImageUrl'] = imageUrl;
-          if (hives[hi]['id'].toString() == message.data['device_id']) {
-            setState(() {
-              hives[hi]['isAlert'] = true;
-              hives[hi]['confidence'] = confidence;
-              hives[hi]['lastDetected'] = DateTime.now();
-              hives[hi]['logs'].add({
-                'time': DateTime.now(),
-                'confidence': confidence,
-              });
-              _selectedGroupIndex = gi;
-              _selectedHiveIndex = hi;
-              _showDetailScreen = true;
-              if (hives[hi]['isAutoMode'] == true)
-                hives[hi]['isDoorOpen'] = false;
-            });
-            break;
-          }
-        }
-      }
+    FirebaseMessaging.onMessageOpenedApp.listen(_handleFcmMessage);
 
-      await _localNotifications.show(
-        0,
-        '말벌 침입 감지!',
-        '벌통 $deviceId | 신뢰도 ${(confidence * 100).toStringAsFixed(1)}%',
-        NotificationDetails(
-          android: AndroidNotificationDetails(
-            'hornet_alert',
-            '말벌 감지 알림',
-            importance: Importance.max,
-            priority: Priority.high,
-            playSound: true,
-            enableVibration: true,
-          ),
-        ),
-      );
+    FirebaseMessaging.instance.getInitialMessage().then((message) {
+      if (message != null) _handleFcmMessage(message);
     });
   }
 
