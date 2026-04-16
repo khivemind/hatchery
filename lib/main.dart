@@ -5,7 +5,6 @@ import 'firebase_options.dart';
 import 'services/api_service.dart';
 import 'settings_screen.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'dart:async';
 import 'dart:math';
 import 'package:flutter_vlc_player/flutter_vlc_player.dart';
 import 'package:http/http.dart' as http;
@@ -26,7 +25,34 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (Firebase.apps.isEmpty) {
     await Firebase.initializeApp();
   }
-  print('[FCM] 백그라운드 메시지: ${message.notification?.title}');
+
+  final FlutterLocalNotificationsPlugin localNotifications =
+      FlutterLocalNotificationsPlugin();
+
+  const AndroidInitializationSettings androidSettings =
+      AndroidInitializationSettings('@mipmap/launcher_icon');
+  await localNotifications.initialize(
+    InitializationSettings(android: androidSettings),
+  );
+
+  final deviceId = message.data['device_id'] ?? '';
+  final confidence = double.tryParse(message.data['confidence'] ?? '0') ?? 0.0;
+
+  await localNotifications.show(
+    0,
+    '말벌 침입 감지!',
+    '벌통 $deviceId | 신뢰도 ${(confidence * 100).toStringAsFixed(1)}%',
+    NotificationDetails(
+      android: AndroidNotificationDetails(
+        'hornet_alert',
+        '말벌 감지 알림',
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+        enableVibration: true,
+      ),
+    ),
+  );
 }
 
 final fcmService = FcmService();
@@ -62,13 +88,17 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
   int _selectedGroupIndex = 0;
   int _selectedHiveIndex = 0;
   bool _showDetailScreen = false;
+  late AnimationController _bannerController;
+  late Animation<Color?> _bannerColor;
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnim;
 
   List<Map<String, dynamic>> _groups = [];
 
@@ -88,16 +118,99 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _bannerController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 600),
+    )..repeat(reverse: true);
+
+    _bannerColor = ColorTween(
+      begin: kRed,
+      end: Color(0xFF8B0000),
+    ).animate(_bannerController);
+
     _initNotifications();
     _loadDevices();
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 800),
+    )..repeat(reverse: true);
+
+    _pulseAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _bannerController.dispose();
+    _pulseController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadDevices() async {
     final groups = await ApiService().getDevices();
     if (groups.isNotEmpty) {
+      for (final group in groups) {
+        final hives = group['hives'] as List;
+        for (final hive in hives) {
+          // 기존 로컬 상태 찾기
+          Map<String, dynamic>? existingHive;
+          for (final g in _groups) {
+            final hivesList = (g['hives'] as List).cast<Map<String, dynamic>>();
+            if (hivesList.isEmpty) continue;
+
+            final found = hivesList.firstWhere(
+              (h) => h['id'].toString() == hive['id'].toString(),
+              orElse: () => <String, dynamic>{},
+            );
+            if (found.isNotEmpty) {
+              existingHive = found;
+              break;
+            }
+          }
+
+          if (existingHive != null) {
+            // 기존 상태 유지
+            hive['isAlert'] = existingHive['isAlert'];
+            hive['confidence'] = existingHive['confidence'];
+            hive['lastDetected'] = existingHive['lastDetected'];
+            hive['logs'] = existingHive['logs'];
+            hive['isDoorOpen'] = existingHive['isDoorOpen'];
+            hive['isAutoMode'] = existingHive['isAutoMode'];
+            hive['predictionImageUrl'] = existingHive['predictionImageUrl'];
+          } else {
+            // 새 벌통이면 서버에서 로그 불러오기
+            final logs = await ApiService().getPredictions(
+              hive['id'].toString(),
+            );
+            hive['logs'] = logs;
+            if (logs.isNotEmpty) {
+              hive['lastDetected'] = logs.last['time'];
+              hive['confidence'] = logs.last['confidence'];
+            }
+          }
+        }
+      }
       setState(() {
         _groups = groups;
       });
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        for (int gi = 0; gi < _groups.length; gi++) {
+          final hives = _groups[gi]['hives'] as List;
+          for (final hive in hives) {
+            await ApiService().registerDevice(
+              deviceId: hive['id'].toString(),
+              userId: 'khivemind',
+              appToken: token,
+              deviceName: hive['name'] as String,
+              group: _groups[gi]['name'] as String,
+            );
+            print('loadDevices 후 토큰 등록: ${hive['id']}');
+          }
+        }
+      }
     }
   }
 
@@ -112,8 +225,8 @@ class _HomeScreenState extends State<HomeScreen> {
     for (int gi = 0; gi < _groups.length; gi++) {
       final hives = _groups[gi]['hives'] as List;
       for (int hi = 0; hi < hives.length; hi++) {
-        hives[hi]['predictionImageUrl'] = imageUrl;
         if (hives[hi]['id'].toString() == message.data['device_id']) {
+          hives[hi]['predictionImageUrl'] = imageUrl;
           setState(() {
             hives[hi]['isAlert'] = true;
             hives[hi]['confidence'] = confidence;
@@ -176,20 +289,6 @@ class _HomeScreenState extends State<HomeScreen> {
         );
     final token = await FirebaseMessaging.instance.getToken();
     print('FCM 토큰: $token');
-
-    const AndroidInitializationSettings androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    await _localNotifications.initialize(
-      InitializationSettings(android: androidSettings),
-    );
-
-    FirebaseMessaging.onMessage.listen(_handleFcmMessage);
-
-    FirebaseMessaging.onMessageOpenedApp.listen(_handleFcmMessage);
-
-    FirebaseMessaging.instance.getInitialMessage().then((message) {
-      if (message != null) _handleFcmMessage(message);
-    });
   }
 
   String _timeAgo(DateTime? dt) {
@@ -251,17 +350,24 @@ class _HomeScreenState extends State<HomeScreen> {
               Expanded(
                 child: _currentHives.isEmpty
                     ? _buildEmptyHiveState()
-                    : SingleChildScrollView(
-                        padding: EdgeInsets.all(14),
-                        child: Column(
-                          children: [
-                            _buildMonitor(hive!),
-                            SizedBox(height: 12),
-                            _buildStatusCards(hive),
-                            SizedBox(height: 12),
-                            _buildTodayLogs(hive),
-                            SizedBox(height: 12),
-                          ],
+                    : RefreshIndicator(
+                        color: kGold,
+                        onRefresh: () async {
+                          await _loadDevices();
+                        },
+                        child: SingleChildScrollView(
+                          physics: AlwaysScrollableScrollPhysics(),
+                          padding: EdgeInsets.all(14),
+                          child: Column(
+                            children: [
+                              _buildMonitor(hive!),
+                              SizedBox(height: 12),
+                              _buildStatusCards(hive),
+                              SizedBox(height: 12),
+                              _buildTodayLogs(hive),
+                              SizedBox(height: 12),
+                            ],
+                          ),
                         ),
                       ),
               ),
@@ -837,13 +943,39 @@ class _HomeScreenState extends State<HomeScreen> {
                 letterSpacing: 1,
               ),
             ),
-            Text(
-              '${logs.length}회',
-              style: TextStyle(
-                fontSize: 12,
-                color: kRed,
-                fontWeight: FontWeight.w500,
-              ),
+            Row(
+              children: [
+                Text(
+                  '${logs.length}회',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: kRed,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                SizedBox(width: 6),
+                GestureDetector(
+                  onTap: () => _showAllLogs(hive),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Color(0xFFFFF8E0),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: kGold, width: 0.5),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          '전체',
+                          style: TextStyle(fontSize: 10, color: kGold),
+                        ),
+                        SizedBox(width: 2),
+                        Icon(Icons.chevron_right, size: 12, color: kGold),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -909,6 +1041,103 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _showAllLogs(Map<String, dynamic> hive) async {
+    // 서버에서 전체 기록 불러오기
+    final allLogs = await ApiService().getPredictions(hive['id'].toString());
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: kCream,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => Column(
+        children: [
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: kLightBorder, width: 0.5),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${hive['name']} 전체 탐지 기록',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: kDarkBrown,
+                  ),
+                ),
+                Text(
+                  '${allLogs.length}회',
+                  style: TextStyle(fontSize: 13, color: kRed),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: allLogs.isEmpty
+                ? Center(
+                    child: Text(
+                      '탐지 기록 없음',
+                      style: TextStyle(color: kMutedGold),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: EdgeInsets.all(16),
+                    itemCount: allLogs.length,
+                    separatorBuilder: (_, __) =>
+                        Divider(height: 1, color: kLightBorder),
+                    itemBuilder: (_, i) {
+                      final log = allLogs[allLogs.length - 1 - i];
+                      return Padding(
+                        padding: EdgeInsets.symmetric(vertical: 10),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 4,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: kRed,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  _formatLogTime(log['time']),
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: kDarkBrown,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Text(
+                              '탐지율 ${(log['confidence'] * 100).toStringAsFixed(0)}%',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Color(0xFFE57373),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAlertBanner(Map<String, dynamic> hive) {
     return Positioned(
       top: 0,
@@ -920,9 +1149,15 @@ class _HomeScreenState extends State<HomeScreen> {
             _showDetailScreen = true;
           });
         },
-        child: Container(
-          color: kRed,
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: AnimatedBuilder(
+          animation: _bannerColor,
+          builder: (context, child) {
+            return Container(
+              color: _bannerColor.value,
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: child,
+            );
+          },
           child: Row(
             children: [
               Container(
@@ -956,214 +1191,239 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDetailScreen(Map<String, dynamic> hive) {
-    return Column(
-      children: [
-        Container(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    return AnimatedBuilder(
+      animation: _pulseAnim,
+      builder: (context, child) {
+        final borderColor = Color.lerp(
+          kRed,
+          Color(0xFFFF5252),
+          _pulseAnim.value,
+        )!;
+        return Container(
           decoration: BoxDecoration(
-            color: kCream,
-            border: Border(bottom: BorderSide(color: kLightBorder, width: 0.5)),
+            border: Border.all(color: borderColor, width: 2),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              GestureDetector(
-                onTap: () => setState(() => _showDetailScreen = false),
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: Color(0xFFF0EBE0),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: kLightBorder, width: 0.5),
-                  ),
-                  child: Icon(
-                    Icons.arrow_back_ios,
-                    size: 14,
-                    color: kMutedGold,
-                  ),
-                ),
+          child: child,
+        );
+      },
+      child: Column(
+        children: [
+          // 헤더
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: kCream,
+              border: Border(
+                bottom: BorderSide(color: kLightBorder, width: 0.5),
               ),
-              Text(
-                'AI 예측 결과',
-                style: TextStyle(
-                  fontFamily: 'Georgia',
-                  fontSize: 16,
-                  letterSpacing: 1,
-                  color: kDarkBrown,
-                  fontWeight: FontWeight.normal,
-                ),
-              ),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: kRed,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  '말벌 감지',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.white,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: SingleChildScrollView(
-            padding: EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Container(
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: kLightRed,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Color(0xFFFFCDD2), width: 0.5),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '감지 시각',
-                            style: TextStyle(fontSize: 11, color: kMutedGold),
-                          ),
-                          SizedBox(height: 2),
-                          Text(
-                            hive['lastDetected'] != null
-                                ? hive['lastDetected'].toString().substring(
-                                    0,
-                                    19,
-                                  )
-                                : '-',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: kRed,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            '신뢰도',
-                            style: TextStyle(fontSize: 11, color: kMutedGold),
-                          ),
-                          SizedBox(height: 2),
-                          Text(
-                            '${(hive['confidence'] * 100).toStringAsFixed(0)}%',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.w500,
-                              color: kRed,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                GestureDetector(
+                  onTap: () => setState(() => _showDetailScreen = false),
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: Color(0xFFF0EBE0),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: kLightBorder, width: 0.5),
+                    ),
+                    child: Icon(
+                      Icons.arrow_back_ios,
+                      size: 14,
+                      color: kMutedGold,
+                    ),
                   ),
                 ),
-                SizedBox(height: 14),
-                _graphLabel('AI 분석 이미지'),
-                SizedBox(height: 6),
-                (hive['predictionImageUrl'] as String? ?? '').isNotEmpty
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          hive['predictionImageUrl'],
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                          loadingBuilder: (context, child, progress) {
-                            if (progress == null) return child;
-                            return Container(
-                              height: 200,
-                              color: kDarkBrown,
-                              child: Center(
-                                child: CircularProgressIndicator(color: kGold),
-                              ),
-                            );
-                          },
-                          errorBuilder: (context, error, stack) => Container(
-                            height: 200,
-                            decoration: BoxDecoration(
-                              color: kDarkBrown,
-                              borderRadius: BorderRadius.circular(10),
+                Text(
+                  'AI 예측 결과',
+                  style: TextStyle(
+                    fontFamily: 'Georgia',
+                    fontSize: 16,
+                    letterSpacing: 1,
+                    color: kDarkBrown,
+                    fontWeight: FontWeight.normal,
+                  ),
+                ),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: kRed,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '말벌 감지',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // 스크롤 영역
+          Expanded(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: kLightRed,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Color(0xFFFFCDD2), width: 0.5),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '감지 시각',
+                              style: TextStyle(fontSize: 11, color: kMutedGold),
                             ),
-                            child: Center(
-                              child: Text(
-                                '이미지를 불러올 수 없어요',
-                                style: TextStyle(
-                                  color: kMutedGold,
-                                  fontSize: 14,
+                            SizedBox(height: 2),
+                            Text(
+                              hive['lastDetected'] != null
+                                  ? _formatLogTime(hive['lastDetected'])
+                                  : '-',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: kRed,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              '신뢰도',
+                              style: TextStyle(fontSize: 11, color: kMutedGold),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              '${(hive['confidence'] * 100).toStringAsFixed(0)}%',
+                              style: TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.w500,
+                                color: kRed,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 14),
+                  _graphLabel('AI 분석 이미지'),
+                  SizedBox(height: 6),
+                  (hive['predictionImageUrl'] as String? ?? '').isNotEmpty
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.network(
+                            hive['predictionImageUrl'],
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            loadingBuilder: (context, child, progress) {
+                              if (progress == null) return child;
+                              return Container(
+                                height: 200,
+                                color: kDarkBrown,
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                    color: kGold,
+                                  ),
+                                ),
+                              );
+                            },
+                            errorBuilder: (context, error, stack) => Container(
+                              height: 200,
+                              decoration: BoxDecoration(
+                                color: kDarkBrown,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '이미지를 불러올 수 없어요',
+                                  style: TextStyle(
+                                    color: kMutedGold,
+                                    fontSize: 14,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      )
-                    : Container(
-                        height: 200,
-                        decoration: BoxDecoration(
-                          color: kDarkBrown,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Center(
-                          child: Text(
-                            '분석 이미지 없음',
-                            style: TextStyle(color: kMutedGold, fontSize: 14),
+                        )
+                      : Container(
+                          height: 200,
+                          decoration: BoxDecoration(
+                            color: kDarkBrown,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Center(
+                            child: Text(
+                              '분석 이미지 없음',
+                              style: TextStyle(color: kMutedGold, fontSize: 14),
+                            ),
                           ),
                         ),
-                      ),
-                SizedBox(height: 12),
-                GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      final hives =
-                          _groups[_selectedGroupIndex]['hives'] as List;
-                      hives[_selectedHiveIndex]['isAlert'] = false;
-                      hives[_selectedHiveIndex]['confidence'] = 0.0;
-                      if (hives[_selectedHiveIndex]['isAutoMode'] == true) {
-                        hives[_selectedHiveIndex]['isDoorOpen'] = true;
-                      }
-                      _showDetailScreen = false;
-                    });
-                  },
-                  child: Container(
-                    width: double.infinity,
-                    padding: EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      color: kDarkBrown,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: kGold, width: 0.8),
-                    ),
-                    child: Text(
-                      '조치 완료',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontFamily: 'Georgia',
-                        fontSize: 16,
-                        letterSpacing: 2,
-                        color: kGold,
-                        fontWeight: FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(height: 12),
-              ],
+                  SizedBox(height: 12),
+                ],
+              ),
             ),
           ),
-        ),
-      ],
+          // 조치완료 버튼 하단 고정
+          Container(
+            padding: EdgeInsets.fromLTRB(14, 10, 14, 14),
+            decoration: BoxDecoration(
+              color: kCream,
+              border: Border(top: BorderSide(color: kLightBorder, width: 0.5)),
+            ),
+            child: _PressableButton(
+              onTap: () {
+                setState(() {
+                  final hives = _groups[_selectedGroupIndex]['hives'] as List;
+                  hives[_selectedHiveIndex]['isAlert'] = false;
+                  hives[_selectedHiveIndex]['confidence'] = 0.0;
+                  if (hives[_selectedHiveIndex]['isAutoMode'] == true) {
+                    hives[_selectedHiveIndex]['isDoorOpen'] = true;
+                  }
+                  _showDetailScreen = false;
+                });
+              },
+              child: Container(
+                width: double.infinity,
+                padding: EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: kGold,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: kGold, width: 0.8),
+                ),
+                child: Text(
+                  '조치 완료',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: 'Georgia',
+                    fontSize: 16,
+                    letterSpacing: 2,
+                    color: kDarkBrown,
+                    fontWeight: FontWeight.normal,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1172,11 +1432,6 @@ class _HomeScreenState extends State<HomeScreen> {
       label,
       style: TextStyle(fontSize: 12, color: kMutedGold, letterSpacing: 1.5),
     );
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
   }
 }
 
@@ -1212,93 +1467,33 @@ class HexLogoPainter extends CustomPainter {
   bool shouldRepaint(_) => false;
 }
 
-class WaveformPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Color(0xFFE8A820)
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-    final path = Path();
-    for (int i = 0; i < size.width.toInt(); i++) {
-      final y =
-          size.height / 2 +
-          (size.height * 0.35) *
-              (i % 40 < 20 ? (i % 20 - 10) / 10 : (10 - i % 20) / 10);
-      if (i == 0)
-        path.moveTo(i.toDouble(), y);
-      else
-        path.lineTo(i.toDouble(), y);
-    }
-    canvas.drawPath(path, paint);
-  }
+class _PressableButton extends StatefulWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+
+  const _PressableButton({required this.child, this.onTap});
 
   @override
-  bool shouldRepaint(_) => false;
+  State<_PressableButton> createState() => _PressableButtonState();
 }
 
-class FFTPainter extends CustomPainter {
+class _PressableButtonState extends State<_PressableButton> {
+  double _scale = 1.0;
+
   @override
-  void paint(Canvas canvas, Size size) {
-    final heights = [
-      15,
-      30,
-      45,
-      90,
-      100,
-      95,
-      70,
-      50,
-      35,
-      22,
-      15,
-      10,
-      8,
-      6,
-      4,
-      3,
-      2,
-      2,
-      1,
-      1,
-    ];
-    final barWidth = size.width / heights.length;
-    for (int i = 0; i < heights.length; i++) {
-      final h = size.height * heights[i] / 100;
-      final isHornet = i >= 2 && i <= 5;
-      final paint = Paint()
-        ..color = isHornet ? Color(0xFFC62828) : Color(0xFFE8A820);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(i * barWidth + 1, size.height - h, barWidth - 2, h),
-          Radius.circular(2),
-        ),
-        paint,
-      );
-    }
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _scale = 0.95),
+      onTapUp: (_) {
+        setState(() => _scale = 1.0);
+        widget.onTap?.call();
+      },
+      onTapCancel: () => setState(() => _scale = 1.0),
+      child: AnimatedScale(
+        scale: _scale,
+        duration: Duration(milliseconds: 80),
+        child: widget.child,
+      ),
+    );
   }
-
-  @override
-  bool shouldRepaint(_) => false;
-}
-
-class SpectrogramPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    for (int x = 0; x < size.width.toInt(); x += 3) {
-      for (int y = 0; y < size.height.toInt(); y += 3) {
-        final intensity = ((x * 0.3 + y * 0.5) % 100) / 100;
-        final paint = Paint()
-          ..color = Color.lerp(
-            Color(0xFF1C1207),
-            intensity > 0.6 ? Color(0xFFC62828) : Color(0xFFE8A820),
-            intensity,
-          )!;
-        canvas.drawRect(Rect.fromLTWH(x.toDouble(), y.toDouble(), 3, 3), paint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_) => false;
 }

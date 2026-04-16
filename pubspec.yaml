@@ -64,8 +64,6 @@ flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
   image_path: "assets/icon/app_icon.png"
-  adaptive_icon_background: "#F8F6F0"  # 크림색으로 배경 채우기
-  adaptive_icon_foreground: "assets/icon/app_icon.png"
   min_sdk_android: 21
  
 flutter:
@@ -75,8 +73,6 @@ flutter:
   # the material Icons class.
   uses-material-design: true
   assets:
-    - assets/images/bee_normal.png
-    - assets/images/bee_alert.png
     - assets/icon/app_icon.png
 
   # To add assets to your application, add an assets section, like this:

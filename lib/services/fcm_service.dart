@@ -19,8 +19,6 @@ class FcmService {
       return;
     }
 
-    await FirebaseMessaging.instance.deleteToken();
-    await Future.delayed(Duration(seconds: 1));
     // 2. FCM 토큰 가져오기
     String? token = await _fcm.getToken();
 
@@ -31,13 +29,6 @@ class FcmService {
     print('[FCM] 토큰: $token');
 
 
-    // 6. 알림 클릭 시 (백그라운드 → 앱 열기)
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      final imageUrl = message.data['image_url'];
-      final deviceId = message.data['device_id'];
-      print('[FCM] 알림 클릭: device=$deviceId, image=$imageUrl');
-      // TODO: 해당 예측 상세 화면으로 이동
-    });
   }
 
   Future<void> _registerDevice({

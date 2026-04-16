@@ -152,4 +152,48 @@ class ApiService {
       return false;
     }
   }
+
+  // ───────────────────────── 감지 기록 조회 ─────────────────────────
+  // GET /v1/predictions
+  Future<List<Map<String, dynamic>>> getPredictions(String deviceId) async {
+    try {
+      final now = DateTime.now();
+      final fromTime =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}T00:00:00';
+      final toTime =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}T23:59:59';
+
+      final uri = Uri.parse('$baseUrl/v1/predictions').replace(
+        queryParameters: {
+          'device_id': deviceId,
+          'from_time': fromTime,
+          'to_time': toTime,
+        },
+      );
+      final response = await http.get(
+        uri,
+        headers: {'x-api-key': Config.apiKey},
+      );
+      if (response.statusCode != 200) return [];
+
+      final data = jsonDecode(response.body);
+      final predictions = data['predictions'] as List;
+
+      return predictions.where((p) => p['is_hornet'] == true).map((p) {
+        // event_time 파싱 (T11-15-40 → T11:15:40 으로 변환)
+        final rawTime = p['event_time'] as String;
+        final fixedTime = rawTime.replaceAllMapped(
+          RegExp(r'T(\d{2})-(\d{2})-(\d{2})'),
+          (m) => 'T${m[1]}:${m[2]}:${m[3]}',
+        );
+        return {
+          'time': DateTime.parse(fixedTime),
+          'confidence': (p['confidence'] as num).toDouble(),
+        };
+      }).toList();
+    } catch (e) {
+      print('감지 기록 조회 실패: $e');
+      return [];
+    }
+  }
 }
