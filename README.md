@@ -56,3 +56,25 @@ FCM 토큰 자동갱신 로직 추가 (onTokenRefresh)
 안드로이드 폰 실기기 테스트 환경 세팅	
 flutter run --release 로 앱 설치	
 FCM background/terminated 수신 처리 추가	
+
+<4/16 전체 작업 내용>
+FCM 토큰 자동갱신 로직 (onTokenRefresh) 안정화	
+fcm_service.dart deleteToken() 제거 (토큰 불안정 원인 제거)
+_handleFcmMessage 함수 분리 및 공통화	
+안드로이드 실기기 연결 및 테스트 환경 세팅	및 설치
+/v1/predictions 서버 연동 (탐지 로그 재시작 후 유지)	
+from_time/to_time 파라미터 형식 수정 (밀리초 제거)	
+_loadDevices 로컬 상태 유지 로직 개선 (새로고침 시 isAlert 등 보존)	
+드래그 새로고침 (RefreshIndicator) 추가	
+벌통 이름 5글자 / 구역 이름 7글자 제한 + 경고 다이얼로그	
+전체 탐지 로그 보기 (bottomSheet + 서버 실시간 조회)	
+버튼 눌림 효과 (_PressableButton, AnimatedScale 0.95)	
+알림 배너 깜빡임 애니메이션 (ColorTween kRed ↔ 0xFF8B0000)	
+AI 예측 화면 테두리 펄스 애니메이션 (TickerProviderStateMixin)	
+조치완료 버튼 하단 고정 + 골드 배경으로 변경	
+구역 삭제 시 소속 벌통 서버 일괄 해제	
+PopScope로 안드로이드 뒤로가기 버튼 result 반환	
+_loadDevices 완료 후 FCM 토큰 자동 재등록	
+앱 아이콘 교체 (골드 벌집 + 빨간 핑 디자인)	
+FCM data-only 전환 (서버팀 반영 완료)	
+foreground FCM 수신 문제 디버깅	🔴 미해결
