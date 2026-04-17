@@ -280,7 +280,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         }
       }
     });
+
     await fcmService.init('khivemind');
+    FirebaseMessaging.onMessage.listen(_handleFcmMessage);
+    FirebaseMessaging.onMessageOpenedApp.listen(_handleFcmMessage);
+
+    final initialMessage = await FirebaseMessaging.instance
+        .getInitialMessage(); // ← 추가
+    if (initialMessage != null) _handleFcmMessage(initialMessage);
+
     await FirebaseMessaging.instance
         .setForegroundNotificationPresentationOptions(
           alert: true,
@@ -496,17 +504,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget _buildGroupTabs() {
     return Container(
       padding: EdgeInsets.fromLTRB(14, 10, 14, 0),
-      child: Row(
-        children: _groups.asMap().entries.map((e) {
-          final gi = e.key;
-          final group = e.value;
-          final isSelected = _selectedGroupIndex == gi;
-          final hasAlert = (group['hives'] as List).any(
-            (h) => h['isAlert'] == true,
-          );
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: _groups.asMap().entries.map((e) {
+            final gi = e.key;
+            final group = e.value;
+            final isSelected = _selectedGroupIndex == gi;
+            final hasAlert = (group['hives'] as List).any(
+              (h) => h['isAlert'] == true,
+            );
 
-          return Expanded(
-            child: GestureDetector(
+            return GestureDetector(
               onTap: () {
                 setState(() {
                   _selectedGroupIndex = gi;
@@ -515,8 +524,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 });
               },
               child: Container(
-                margin: EdgeInsets.symmetric(horizontal: 3),
-                padding: EdgeInsets.symmetric(vertical: 8),
+                margin: EdgeInsets.only(right: 6),
+                padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
                   color: hasAlert
                       ? kLightRed
@@ -531,7 +540,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
                 child: Text(
                   group['name'],
-                  textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
@@ -539,9 +547,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ),
                 ),
               ),
-            ),
-          );
-        }).toList(),
+            );
+          }).toList(),
+        ),
       ),
     );
   }
