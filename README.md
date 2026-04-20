@@ -78,3 +78,21 @@ _loadDevices 완료 후 FCM 토큰 자동 재등록
 앱 아이콘 교체 (골드 벌집 + 빨간 핑 디자인)	
 FCM data-only 전환 (서버팀 반영 완료)	
 foreground FCM 수신 문제 디버깅	🔴 미해결
+
+<4/17 전체 작업 내용>
+1. FCM 버그 해결 
+FirebaseMessaging.onMessage.listen(_handleFcmMessage) 추가
+onMessageOpenedApp, getInitialMessage 추가
+flutter run --release로 실기기 테스트 완료
+
+2. 기타 앱 수정
+
+탐지 로그 시간 버그 수정 (DateTime.parse(fixedTime).toLocal())
+구역 탭 슬라이딩 적용 (SingleChildScrollView)
+앱 이름 변경 (AndroidManifest.xml)
+
+3. 분류 모델 탐색
+
+멜 스펙트로그램으로 Bee/Hornet 시각적 차이 확인
+MFCC + Spectral Contrast + 멜 스펙트로그램 피처 추출 방향 설정
+CNN → 랜덤 포레스트 전환 시도 (보류)
