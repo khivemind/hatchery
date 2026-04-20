@@ -96,3 +96,21 @@ flutter run --release로 실기기 테스트 완료
 멜 스펙트로그램으로 Bee/Hornet 시각적 차이 확인
 MFCC + Spectral Contrast + 멜 스펙트로그램 피처 추출 방향 설정
 CNN → 랜덤 포레스트 전환 시도 (보류)
+
+<4/20 전체 작업 내용>
+1. 장치 상태 변경(벌통 감지 ON/OFF) API 연동 성공
+기존 문제: PATCH 메서드로 데이터를 보낼 때 Body에 담아 보냈더니 서버에서 인식은 하지만 앱에서는 계속 '실패' 팝업이 뜸.
+원인 분석: API 문서를 재검토한 결과, is_enabled 값을 Body가 아닌 Query Parameter(?is_enabled=true)로 보내야 한다는 점을 발견함.
+해결: ApiService.dart에서 Uri.replace를 사용해 주소 뒤에 파라미터를 붙이는 방식으로 수정하여 통신 성공(Status Code 200).
+
+2. 개발 환경 메모리 최적화 컨설팅
+현황: 메모리 사용량이 87%까지 치솟아 시스템 과부하 발생 (qemu-system, OpenJDK, Chrome이 주범).
+
+조치 사항:
+안드로이드 에뮬레이터 대신 실제 기기(Physical Device) 사용 권장.
+크롬 '메모리 절약 모드' 활성화 및 안쓰는 탭 정리.
+VS Code '작업 관리자'를 통한 무거운 확장 프로그램 식별 및 'Profile' 기능을 활용한 가벼운 환경 설정 제안.
+
+3. 모델 성능 향상을 위한 전략 수립
+이슈: 학습 정확도는 100%에 가깝지만 실전 데이터 예측(Prediction) 성능이 떨어지는 '과적합' 의심 상황.
+대안: 꿀벌의 스트레스 반응(화난 날갯짓 소리)을 1차로 감지하고 말벌을 2차로 확인하는 '2중 계층적 분류(Hierarchical Classification)' 아이디어 구체화 및 학습 데이터 수집처 확보.
