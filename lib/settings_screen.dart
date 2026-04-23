@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'services/api_service.dart';
+import 'widgets/pressable_button.dart';
 
 class SettingsScreen extends StatefulWidget {
   final List<Map<String, dynamic>> groups;
@@ -32,6 +33,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             'hives': (g['hives'] as List)
                 .map((h) => Map<String, dynamic>.from(h))
                 .toList(),
+            'cctvUrl': g['cctvUrl'] ?? '', // ← 추가
           },
         )
         .toList();
@@ -47,6 +49,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _addGroup() {
     final outerContext = context;
     final nameController = TextEditingController();
+    final cctvController = TextEditingController();
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -62,18 +65,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
             fontWeight: FontWeight.normal,
           ),
         ),
-        content: TextField(
-          controller: nameController,
-          autofocus: true,
-          decoration: InputDecoration(
-            hintText: '구역 이름',
-            hintStyle: TextStyle(fontSize: 13, color: mutedGold),
-            enabledBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: lightBorder),
-            ),
-            focusedBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: gold),
-            ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: '구역 이름',
+                  hintStyle: TextStyle(fontSize: 13, color: mutedGold),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: lightBorder),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: gold),
+                  ),
+                ),
+              ),
+              SizedBox(height: 12),
+              TextField(
+                controller: cctvController,
+                decoration: InputDecoration(
+                  labelText: 'CCTV URL (선택)',
+                  hintText: '예: rtsp://192.168.0.10:554/stream',
+                  hintStyle: TextStyle(fontSize: 11, color: mutedGold),
+                  labelStyle: TextStyle(fontSize: 12, color: mutedGold),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: lightBorder),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: gold),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         actions: [
@@ -115,7 +141,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               }
 
               setState(() {
-                _groups.add({'name': name, 'hives': []});
+                _groups.add({
+                  'name': name,
+                  'hives': [],
+                  'cctvUrl': cctvController.text.trim(),
+                });
               });
               Navigator.pop(outerContext);
             },
@@ -130,7 +160,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _addHive(int groupIndex) {
     final outerContext = context;
     final nameController = TextEditingController();
-    final cctvController = TextEditingController();
     final ipController = TextEditingController();
     String? _nameError;
 
@@ -161,22 +190,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   labelText: '벌통 이름',
                   hintText: '예: 벌통 1',
                   hintStyle: TextStyle(fontSize: 13, color: mutedGold),
-                  labelStyle: TextStyle(fontSize: 12, color: mutedGold),
-                  enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: lightBorder),
-                  ),
-                  focusedBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: gold),
-                  ),
-                ),
-              ),
-              SizedBox(height: 12),
-              TextField(
-                controller: cctvController,
-                decoration: InputDecoration(
-                  labelText: 'CCTV URL (선택)',
-                  hintText: '예: rtsp://192.168.0.10:554/stream',
-                  hintStyle: TextStyle(fontSize: 11, color: mutedGold),
                   labelStyle: TextStyle(fontSize: 12, color: mutedGold),
                   enabledBorder: UnderlineInputBorder(
                     borderSide: BorderSide(color: lightBorder),
@@ -252,7 +265,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 hives.add({
                   'id': int.parse(deviceId),
                   'name': deviceName,
-                  'cctvUrl': cctvController.text.trim(),
                   'raspberryPiIp': ipController.text.trim(),
                   'isAlert': false,
                   'confidence': 0.0,
@@ -297,9 +309,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final outerContext = context;
     final hive = (_groups[groupIndex]['hives'] as List)[hiveIndex];
     final nameController = TextEditingController(text: hive['name'] as String);
-    final cctvController = TextEditingController(
-      text: (hive['cctvUrl'] as String?) ?? '',
-    );
     final ipController = TextEditingController(
       text: (hive['raspberryPiIp'] as String?) ?? '',
     );
@@ -322,46 +331,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               TextField(
                 controller: nameController,
                 autofocus: true,
                 decoration: InputDecoration(
-                  labelText: '벌통 이름',
-                  labelStyle: TextStyle(fontSize: 12, color: mutedGold),
-                  enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: lightBorder),
-                  ),
-                  focusedBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: gold),
-                  ),
-                ),
-              ),
-              SizedBox(height: 12),
-              TextField(
-                controller: cctvController,
-                decoration: InputDecoration(
-                  labelText: 'CCTV URL (선택)',
-                  hintText: '예: rtsp://192.168.0.10:554/stream',
-                  hintStyle: TextStyle(fontSize: 11, color: mutedGold),
-                  labelStyle: TextStyle(fontSize: 12, color: mutedGold),
-                  enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: lightBorder),
-                  ),
-                  focusedBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: gold),
-                  ),
-                ),
-              ),
-              SizedBox(height: 12),
-              TextField(
-                controller: ipController,
-                decoration: InputDecoration(
-                  labelText: '라즈베리파이 IP (선택)',
-                  hintText: '예: 192.168.0.20',
-                  hintStyle: TextStyle(fontSize: 11, color: mutedGold),
-                  labelStyle: TextStyle(fontSize: 12, color: mutedGold),
+                  hintText: '구역 이름',
+                  hintStyle: TextStyle(fontSize: 13, color: mutedGold),
                   enabledBorder: UnderlineInputBorder(
                     borderSide: BorderSide(color: lightBorder),
                   ),
@@ -401,7 +377,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               setState(() {
                 final h = (_groups[groupIndex]['hives'] as List)[hiveIndex];
                 h['name'] = deviceName;
-                h['cctvUrl'] = cctvController.text.trim();
                 h['raspberryPiIp'] = ipController.text.trim();
               });
 
@@ -518,6 +493,100 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  // ───────────────────────── 구역 수정 ─────────────────────────
+  void _editGroup(int index) {
+    final outerContext = context;
+    final group = _groups[index];
+    final nameController = TextEditingController(text: group['name'] as String);
+    final cctvController = TextEditingController(
+      text: (group['cctvUrl'] as String?) ?? '',
+    );
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: cream,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          '구역 수정',
+          style: TextStyle(
+            fontFamily: 'Georgia',
+            fontSize: 16,
+            letterSpacing: 1,
+            color: darkBrown,
+            fontWeight: FontWeight.normal,
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: '구역 이름',
+                  labelStyle: TextStyle(fontSize: 12, color: mutedGold),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: lightBorder),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: gold),
+                  ),
+                ),
+              ),
+              SizedBox(height: 12),
+              TextField(
+                controller: cctvController,
+                decoration: InputDecoration(
+                  labelText: 'CCTV URL (선택)',
+                  hintText: '예: rtsp://192.168.0.10:554/stream',
+                  hintStyle: TextStyle(fontSize: 11, color: mutedGold),
+                  labelStyle: TextStyle(fontSize: 12, color: mutedGold),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: lightBorder),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: gold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(outerContext),
+            child: Text('취소', style: TextStyle(color: mutedGold)),
+          ),
+          TextButton(
+            onPressed: () {
+              final name = nameController.text.trim();
+              if (name.isEmpty) return;
+
+              if (name.length > 7) {
+                ScaffoldMessenger.of(outerContext).showSnackBar(
+                  SnackBar(
+                    content: Text('구역 이름은 7글자 이하로 입력해주세요'),
+                    backgroundColor: kRed,
+                  ),
+                );
+                return;
+              }
+
+              setState(() {
+                _groups[index]['name'] = name;
+                _groups[index]['cctvUrl'] = cctvController.text.trim();
+              });
+              Navigator.pop(outerContext);
+            },
+            child: Text('저장', style: TextStyle(color: gold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -559,7 +628,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 _sectionLabel('구역 관리'),
-                GestureDetector(
+                PressableButton(
                   onTap: _addGroup,
                   child: Container(
                     padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -654,7 +723,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           Row(
                             children: [
-                              GestureDetector(
+                              PressableButton(
+                                onTap: () => _editGroup(gi), // ← 수정 버튼 추가
+                                child: Icon(
+                                  Icons.edit_outlined,
+                                  size: 18,
+                                  color: mutedGold,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              PressableButton(
                                 onTap: () => _addHive(gi),
                                 child: Container(
                                   padding: EdgeInsets.symmetric(
@@ -682,7 +760,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                               ),
                               SizedBox(width: 8),
-                              GestureDetector(
+                              PressableButton(
                                 onTap: () => _deleteGroup(gi),
                                 child: Icon(
                                   Icons.delete_outline,
@@ -729,12 +807,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                           color: darkBrown,
                                         ),
                                       ),
+                                      SizedBox(width: 6),
+                                      Text(
+                                        'ID: ${hive['id']}',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: mutedGold,
+                                        ),
+                                      ),
                                     ],
                                   ),
                                   Row(
                                     children: [
                                       // ✏️ 수정 버튼 (신규 추가)
-                                      GestureDetector(
+                                      PressableButton(
                                         onTap: () => _editHive(gi, hi),
                                         child: Icon(
                                           Icons.edit_outlined,
@@ -744,7 +830,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       ),
                                       SizedBox(width: 12),
                                       // 삭제 버튼
-                                      GestureDetector(
+                                      PressableButton(
                                         onTap: () => _deleteHive(gi, hi),
                                         child: Icon(
                                           Icons.close,

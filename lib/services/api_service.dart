@@ -10,7 +10,7 @@ class ApiService {
   Future<Map<String, dynamic>> predict(int hiveId, String wavBase64) async {
     final response = await http.post(
       Uri.parse('$baseUrl/v1/predict'),
-      headers: {'Content-Type': 'application/json', 'x-api-key': Config.apiKey},
+      headers: {'Content-Type': 'application/json', 'x-api-key': apiKey},
       body: jsonEncode({
         'id': hiveId.toString(),
         'event_time': DateTime.now().toIso8601String(),
@@ -26,23 +26,18 @@ class ApiService {
   }
 
   // ───────────────────────── 벌통 목록 조회 ─────────────────────────
-  // GET /v1/devices → _groups 구조로 변환해서 반환
   Future<List<Map<String, dynamic>>> getDevices() async {
     try {
       final uri = Uri.parse(
         '$baseUrl/v1/devices',
       ).replace(queryParameters: {'user_id': 'khivemind'});
-      final response = await http.get(
-        uri,
-        headers: {'x-api-key': Config.apiKey},
-      );
+      final response = await http.get(uri, headers: {'x-api-key': apiKey});
 
       if (response.statusCode != 200) return [];
 
       final data = jsonDecode(response.body);
       final devices = data['devices'] as List;
 
-      // group 기준으로 묶기
       final Map<String, List<Map<String, dynamic>>> groupMap = {};
       for (final device in devices) {
         final groupName = device['group'] as String? ?? '기본 구역';
@@ -50,6 +45,7 @@ class ApiService {
         groupMap[groupName]!.add({
           'id': int.tryParse(device['device_id'] ?? '0') ?? 0,
           'name': device['device_name'] ?? '',
+          'is_enabled': device['is_enabled'] ?? true, // 스위치 상태 반영
           'cctvUrl': '',
           'raspberryPiIp': '',
           'isAlert': false,
@@ -64,9 +60,8 @@ class ApiService {
         });
       }
 
-      // _groups 구조로 변환
       return groupMap.entries
-          .map((e) => {'name': e.key, 'hives': e.value})
+          .map((e) => {'name': e.key, 'hives': e.value, 'cctvUrl': ''})
           .toList();
     } catch (e) {
       print('벌통 목록 조회 실패: $e');
@@ -74,8 +69,7 @@ class ApiService {
     }
   }
 
-  // ───────────────────────── 벌통 등록 ─────────────────────────
-  // POST /v1/register-device
+  // ───────────────────────── 벌통 등록 (복구됨) ─────────────────────────
   Future<bool> registerDevice({
     required String deviceId,
     required String userId,
@@ -86,10 +80,7 @@ class ApiService {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/v1/register-device'),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': Config.apiKey,
-        },
+        headers: {'Content-Type': 'application/json', 'x-api-key': apiKey},
         body: jsonEncode({
           'device_id': deviceId,
           'user_id': userId,
@@ -105,16 +96,12 @@ class ApiService {
     }
   }
 
-  // ───────────────────────── 벌통 해제 ─────────────────────────
-  // POST /v1/unregister-device
+  // ───────────────────────── 벌통 해제 (복구됨) ─────────────────────────
   Future<bool> unregisterDevice({required String deviceId}) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/v1/unregister-device'),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': Config.apiKey,
-        },
+        headers: {'Content-Type': 'application/json', 'x-api-key': apiKey},
         body: jsonEncode({'device_id': deviceId}),
       );
       return response.statusCode == 200;
@@ -124,8 +111,7 @@ class ApiService {
     }
   }
 
-  // ───────────────────────── 벌통 수정 ─────────────────────────
-  // POST /v1/update-device
+  // ───────────────────────── 벌통 수정 (복구됨) ─────────────────────────
   Future<bool> updateDevice({
     required String deviceId,
     required String deviceName,
@@ -135,10 +121,7 @@ class ApiService {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/v1/update-device'),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': Config.apiKey,
-        },
+        headers: {'Content-Type': 'application/json', 'x-api-key': apiKey},
         body: jsonEncode({
           'device_id': deviceId,
           'device_name': deviceName,
@@ -153,8 +136,7 @@ class ApiService {
     }
   }
 
-  // ───────────────────────── 감지 기록 조회 ─────────────────────────
-  // GET /v1/predictions
+  // ───────────────────────── 감지 기록 조회 (GET) ─────────────────────────
   Future<List<Map<String, dynamic>>> getPredictions(String deviceId) async {
     try {
       final now = DateTime.now();
@@ -170,30 +152,74 @@ class ApiService {
           'to_time': toTime,
         },
       );
-      final response = await http.get(
-        uri,
-        headers: {'x-api-key': Config.apiKey},
-      );
+
+      final response = await http.get(uri, headers: {'x-api-key': apiKey});
+
       if (response.statusCode != 200) return [];
 
       final data = jsonDecode(response.body);
       final predictions = data['predictions'] as List;
 
       return predictions.where((p) => p['is_hornet'] == true).map((p) {
-        // event_time 파싱 (T11-15-40 → T11:15:40 으로 변환)
         final rawTime = p['event_time'] as String;
         final fixedTime = rawTime.replaceAllMapped(
           RegExp(r'T(\d{2})-(\d{2})-(\d{2})'),
           (m) => 'T${m[1]}:${m[2]}:${m[3]}',
         );
         return {
-          'time': DateTime.parse(fixedTime),
+          'time': DateTime.parse(fixedTime).toLocal(),
           'confidence': (p['confidence'] as num).toDouble(),
+          'prediction_seq': p['prediction_seq'],
         };
       }).toList();
     } catch (e) {
       print('감지 기록 조회 실패: $e');
       return [];
+    }
+  }
+
+  // ───────────────────────── 벌통 상태 제어 (PATCH) ─────────────────────────
+  Future<bool> updateDeviceStatus(String deviceId, bool isEnabled) async {
+    try {
+      // 1. 주소 뒤에 ?is_enabled=true/false 를 붙여주는 게 핵심!
+      final uri = Uri.parse(
+        '$baseUrl/v1/devices/$deviceId/status',
+      ).replace(queryParameters: {'is_enabled': isEnabled.toString()});
+
+      final response = await http.patch(
+        uri,
+        headers: {'Content-Type': 'application/json', 'x-api-key': apiKey},
+      );
+
+      print('서버 응답 코드: ${response.statusCode}');
+      print('서버 응답 내용: ${response.body}');
+
+      return response.statusCode == 200;
+    } catch (e) {
+      print('상태 변경 통신 실패: $e');
+      return false;
+    }
+  }
+
+  Future<String?> getPredictionImageUrl({
+    required String deviceId,
+    required String predictionSeq,
+  }) async {
+    try {
+      final uri = Uri.parse('$baseUrl/v1/prediction').replace(
+        queryParameters: {
+          'device_id': deviceId,
+          'prediction_seq': predictionSeq.toString(),
+        },
+      );
+      final response = await http.get(uri, headers: {'x-api-key': apiKey});
+      if (response.statusCode != 200) return null;
+      final data = jsonDecode(response.body);
+      print('단건 조회 응답: $data');  // ← 추가
+      return data['prediction']['image_url'] as String?;
+    } catch (e) {
+      print('단건 이미지 조회 실패: $e');
+      return null;
     }
   }
 }

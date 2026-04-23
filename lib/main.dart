@@ -6,11 +6,14 @@ import 'services/api_service.dart';
 import 'settings_screen.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'dart:math';
-import 'package:flutter_vlc_player/flutter_vlc_player.dart';
+import 'package:video_player/video_player.dart';
 import 'package:http/http.dart' as http;
 import 'services/config.dart';
 import 'services/fcm_service.dart';
 import 'splash_screen.dart';
+import 'widgets/pressable_button.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const kCream = Color(0xFFF8F6F0);
 const kGold = Color(0xFFE8A820);
@@ -56,16 +59,37 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
 
 final fcmService = FcmService();
+RemoteMessage? _initialMessage;
+
+final FlutterLocalNotificationsPlugin _globalLocalNotifications =
+    FlutterLocalNotificationsPlugin();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _globalLocalNotifications.initialize(
+    InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/launcher_icon'),
+    ),
+    onDidReceiveNotificationResponse: (details) {
+      // 알림 탭 시 payload로 FCM 데이터 전달
+      if (details.payload != null) {
+        _pendingPayload = details.payload;
+      }
+    },
+  );
+
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
   } catch (e) {}
+
+  _initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   runApp(HivemindApp());
 }
+
+String? _pendingPayload;
 
 class HivemindApp extends StatelessWidget {
   @override
@@ -92,6 +116,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
+  bool _showLogDetail = false;
+  Set<int> _expandedGroups = {};
   int _selectedGroupIndex = 0;
   int _selectedHiveIndex = 0;
   bool _showDetailScreen = false;
@@ -128,9 +154,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       end: Color(0xFF8B0000),
     ).animate(_bannerController);
 
-    _initNotifications();
-    _loadDevices();
-
     _pulseController = AnimationController(
       vsync: this,
       duration: Duration(milliseconds: 800),
@@ -139,6 +162,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _pulseAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await _initNotifications(); // 먼저
+    await _loadDevices(); // 그 다음
   }
 
   @override
@@ -192,9 +221,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           }
         }
       }
+      // 기존 구역의 cctvUrl 유지
+      for (final group in groups) {
+        for (final g in _groups) {
+          if (g['name'] == group['name']) {
+            group['cctvUrl'] = g['cctvUrl'] ?? '';
+            break;
+          }
+        }
+      }
+
       setState(() {
         _groups = groups;
       });
+      setState(() {
+        _groups = groups;
+      });
+      await _loadCctvUrls();
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         for (int gi = 0; gi < _groups.length; gi++) {
@@ -211,6 +254,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           }
         }
       }
+    }
+
+    if (_pendingPayload != null) {
+      final data = jsonDecode(_pendingPayload!);
+      _handleFcmMessageFromData(data);
+      _pendingPayload = null;
+    } else if (_initialMessage != null) {
+      _handleFcmMessage(_initialMessage!);
+      _initialMessage = null;
     }
   }
 
@@ -237,7 +289,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             });
             _selectedGroupIndex = gi;
             _selectedHiveIndex = hi;
-            _showDetailScreen = true;
+            _expandedGroups.add(gi);
+            _showDetailScreen = false;
             if (hives[hi]['isAutoMode'] == true)
               hives[hi]['isDoorOpen'] = false;
           });
@@ -260,7 +313,39 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           enableVibration: true,
         ),
       ),
+      payload: jsonEncode(message.data), // ← 추가
     );
+  }
+
+  void _handleFcmMessageFromData(Map<String, dynamic> data) async {
+    final deviceId = data['device_id'] ?? '';
+    final confidence = double.tryParse(data['confidence'] ?? '0') ?? 0.0;
+    final imageUrl = data['image_url'] ?? '';
+
+    for (int gi = 0; gi < _groups.length; gi++) {
+      final hives = _groups[gi]['hives'] as List;
+      for (int hi = 0; hi < hives.length; hi++) {
+        if (hives[hi]['id'].toString() == deviceId) {
+          hives[hi]['predictionImageUrl'] = imageUrl;
+          setState(() {
+            hives[hi]['isAlert'] = true;
+            hives[hi]['confidence'] = confidence;
+            hives[hi]['lastDetected'] = DateTime.now();
+            hives[hi]['logs'].add({
+              'time': DateTime.now(),
+              'confidence': confidence,
+            });
+            _selectedGroupIndex = gi;
+            _selectedHiveIndex = hi;
+            _expandedGroups.add(gi);
+            _showDetailScreen = false;
+            if (hives[hi]['isAutoMode'] == true)
+              hives[hi]['isDoorOpen'] = false;
+          });
+          break;
+        }
+      }
+    }
   }
 
   Future<void> _initNotifications() async {
@@ -284,10 +369,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await fcmService.init('khivemind');
     FirebaseMessaging.onMessage.listen(_handleFcmMessage);
     FirebaseMessaging.onMessageOpenedApp.listen(_handleFcmMessage);
-
-    final initialMessage = await FirebaseMessaging.instance
-        .getInitialMessage(); // ← 추가
-    if (initialMessage != null) _handleFcmMessage(initialMessage);
 
     await FirebaseMessaging.instance
         .setForegroundNotificationPresentationOptions(
@@ -336,7 +417,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return Scaffold(
       backgroundColor: kCream,
       body: SafeArea(
-        child: _showDetailScreen && hive != null
+        child: _showLogDetail
+            ? _buildLogDetailScreen()
+            : _showDetailScreen && hive != null
             ? _buildDetailScreen(hive)
             : _buildMainScreen(),
       ),
@@ -369,7 +452,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           child: Column(
                             children: [
                               _buildMonitor(hive!),
-                              SizedBox(height: 12),
+                              SizedBox(height: 8),
+                              _buildMonitorActions(hive),
                               _buildStatusCards(hive),
                               SizedBox(height: 12),
                               _buildTodayLogs(hive),
@@ -387,6 +471,94 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildMonitorActions(Map<String, dynamic> hive) {
+    final isAlert = hive['isAlert'] as bool;
+
+    return Row(
+      children: [
+        // 감지 활성화 토글 (왼쪽)
+        Expanded(
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: kLightBorder, width: 0.5),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.radar, size: 18, color: Colors.amber),
+                    SizedBox(width: 6),
+                    Text(
+                      '감지 가동',
+                      style: TextStyle(fontSize: 13, color: kDarkBrown),
+                    ),
+                  ],
+                ),
+                Transform.scale(
+                  scale: 0.8,
+                  child: Switch(
+                    value: hive['is_enabled'] ?? true,
+                    activeColor: kGold,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onChanged: (bool value) async {
+                      bool success = await ApiService().updateDeviceStatus(
+                        hive['id'].toString(),
+                        value,
+                      );
+                      if (success) {
+                        setState(() {
+                          hive['is_enabled'] = value;
+                        });
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('상태 변경에 실패했습니다.')),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        // AI 분석결과 버튼 (알림 왔을 때만, 오른쪽)
+        if (isAlert) ...[
+          SizedBox(width: 8),
+          Expanded(
+            child: PressableButton(
+              onTap: () {
+                setState(() {
+                  _showDetailScreen = true;
+                });
+              },
+              child: Container(
+                padding: EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: kRed,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  'AI 분석결과',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _buildEmptyState() {
     return GestureDetector(
       onTap: () async {
@@ -398,6 +570,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           setState(() {
             _groups = result['groups'];
           });
+          await _saveCctvUrls(); // ← 추가
         }
       },
       child: Center(
@@ -465,7 +638,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
             ],
           ),
-          GestureDetector(
+          PressableButton(
             onTap: () async {
               final result = await Navigator.push(
                 context,
@@ -483,6 +656,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     _selectedHiveIndex = 0;
                   }
                 });
+                await _saveCctvUrls();
               }
             },
             child: Container(
@@ -502,44 +676,59 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildGroupTabs() {
+    const double minButtonWidth = 40.0; // 버튼 최소 너비 (글자 기준)
+    const double gap = 6.0;
+
     return Container(
       padding: EdgeInsets.fromLTRB(14, 10, 14, 0),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: _groups.asMap().entries.map((e) {
-            final gi = e.key;
-            final group = e.value;
-            final isSelected = _selectedGroupIndex == gi;
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final totalWidth = constraints.maxWidth;
+          final count = _groups.length;
+          final totalGap = gap * (count - 1);
+          final buttonWidth = count == 0
+              ? totalWidth
+              : (totalWidth - totalGap) / count;
+          final useScroll = buttonWidth < minButtonWidth;
+
+          Widget buildButton(int gi) {
+            final group = _groups[gi];
+            final isExpanded = _expandedGroups.contains(gi);
             final hasAlert = (group['hives'] as List).any(
               (h) => h['isAlert'] == true,
             );
 
-            return GestureDetector(
+            return PressableButton(
               onTap: () {
                 setState(() {
-                  _selectedGroupIndex = gi;
-                  _selectedHiveIndex = 0;
+                  if (_expandedGroups.contains(gi)) {
+                    _expandedGroups.remove(gi); // 같은 구역 누르면 접기
+                  } else {
+                    _expandedGroups.clear(); // ← 추가: 다른 구역 다 접기
+                    _expandedGroups.add(gi);
+                    _selectedGroupIndex = gi;
+                    _selectedHiveIndex = 0;
+                  }
                   _showDetailScreen = false;
                 });
               },
               child: Container(
-                margin: EdgeInsets.only(right: 6),
                 padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
                   color: hasAlert
                       ? kLightRed
-                      : (isSelected ? Color(0xFFFFF8E0) : Color(0xFFF0EBE0)),
+                      : (isExpanded ? Color(0xFFFFF8E0) : Color(0xFFF0EBE0)),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: hasAlert
                         ? kRed
-                        : (isSelected ? kGold : kLightBorder),
-                    width: hasAlert || isSelected ? 1.5 : 0.5,
+                        : (isExpanded ? kGold : kLightBorder),
+                    width: hasAlert || isExpanded ? 1.5 : 0.5,
                   ),
                 ),
                 child: Text(
                   group['name'],
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
@@ -548,14 +737,52 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
               ),
             );
-          }).toList(),
-        ),
+          }
+
+          if (useScroll) {
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: _groups.asMap().entries.map((e) {
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      right: e.key < _groups.length - 1 ? gap : 0,
+                    ),
+                    child: SizedBox(
+                      width: minButtonWidth,
+                      child: buildButton(e.key),
+                    ),
+                  );
+                }).toList(),
+              ),
+            );
+          }
+
+          return Row(
+            children: _groups.asMap().entries.map((e) {
+              return Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    right: e.key < _groups.length - 1 ? gap : 0,
+                  ),
+                  child: buildButton(e.key),
+                ),
+              );
+            }).toList(),
+          );
+        },
       ),
     );
   }
 
   Widget _buildHiveTabs() {
-    final hives = _currentHives;
+    if (_expandedGroups.isEmpty) return SizedBox.shrink();
+
+    final gi = _expandedGroups.first;
+    if (gi >= _groups.length) return SizedBox.shrink();
+
+    final hives = _groups[gi]['hives'] as List;
+
     if (hives.isEmpty) {
       return Padding(
         padding: EdgeInsets.all(14),
@@ -565,70 +792,119 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ),
       );
     }
-    return Container(
-      padding: EdgeInsets.fromLTRB(14, 8, 14, 4),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: hives.asMap().entries.map((e) {
-            final hi = e.key;
-            final hive = e.value;
-            final isAlert = hive['isAlert'] as bool;
-            final isSelected = _selectedHiveIndex == hi;
 
-            return GestureDetector(
-              onTap: () {
-                setState(() {
-                  _selectedHiveIndex = hi;
-                  _showDetailScreen = isAlert;
-                });
-              },
-              child: Container(
-                margin: EdgeInsets.only(right: 6),
-                padding: EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                decoration: BoxDecoration(
-                  color: isAlert
-                      ? kLightRed
-                      : (isSelected ? Color(0xFFFFF8E0) : Color(0xFFF0EBE0)),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: isAlert ? kRed : (isSelected ? kGold : kLightBorder),
-                    width: isAlert || isSelected ? 1.5 : 0.5,
+    const double minButtonWidth = 40.0;
+    const double gap = 6.0;
+
+    return AnimatedSize(
+      duration: Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+      child: Container(
+        padding: EdgeInsets.fromLTRB(14, 8, 14, 4),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final totalWidth = constraints.maxWidth;
+            final count = hives.length;
+            final totalGap = gap * (count - 1);
+            final buttonWidth = count == 0
+                ? totalWidth
+                : (totalWidth - totalGap) / count;
+            final useScroll = buttonWidth < minButtonWidth;
+
+            Widget buildButton(int hi) {
+              final hive = hives[hi];
+              final isAlert = hive['isAlert'] as bool;
+              final isSelected =
+                  _selectedGroupIndex == gi && _selectedHiveIndex == hi;
+
+              return PressableButton(
+                onTap: () {
+                  setState(() {
+                    _selectedGroupIndex = gi;
+                    _selectedHiveIndex = hi;
+                  });
+                },
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: isAlert
+                        ? kLightRed
+                        : (isSelected ? Color(0xFFFFF8E0) : Color(0xFFF0EBE0)),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isAlert
+                          ? kRed
+                          : (isSelected ? kGold : kLightBorder),
+                      width: isAlert || isSelected ? 1.5 : 0.5,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        hive['name'],
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: isAlert ? kRed : kDarkBrown,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        isAlert ? '말벌 감지 ⚠️' : '정상',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isAlert ? Color(0xFFE57373) : kMutedGold,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                child: Column(
-                  children: [
-                    Text(
-                      hive['name'],
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: isAlert ? kRed : kDarkBrown,
+              );
+            }
+
+            if (useScroll) {
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: hives.asMap().entries.map((e) {
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        right: e.key < hives.length - 1 ? gap : 0,
                       ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      isAlert ? '감지 →' : '정상',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isAlert ? Color(0xFFE57373) : kMutedGold,
+                      child: SizedBox(
+                        width: minButtonWidth,
+                        child: buildButton(e.key),
                       ),
-                    ),
-                  ],
+                    );
+                  }).toList(),
                 ),
-              ),
+              );
+            }
+
+            return Row(
+              children: hives.asMap().entries.map((e) {
+                return Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      right: e.key < hives.length - 1 ? gap : 0,
+                    ),
+                    child: buildButton(e.key),
+                  ),
+                );
+              }).toList(),
             );
-          }).toList(),
+          },
         ),
       ),
     );
   }
 
   Widget _buildMonitor(Map<String, dynamic> hive) {
-    final cctvUrl = (hive['cctvUrl'] as String?) ?? '';
+    final cctvUrl = (_groups[_selectedGroupIndex]['cctvUrl'] as String?) ?? '';
 
     return Container(
-      height: 180,
+      height: 220,
       decoration: BoxDecoration(
         color: kDarkBrown,
         borderRadius: BorderRadius.circular(14),
@@ -642,22 +918,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         child: Stack(
           children: [
             cctvUrl.isNotEmpty
-                ? SizedBox.expand(
-                    child: FittedBox(
-                      fit: BoxFit.cover,
-                      child: VlcPlayer(
-                        controller: VlcPlayerController.network(
-                          cctvUrl,
-                          autoPlay: true,
-                          options: VlcPlayerOptions(),
-                        ),
-                        aspectRatio: 16 / 9,
-                        placeholder: Center(
-                          child: CircularProgressIndicator(color: kGold),
-                        ),
-                      ),
-                    ),
-                  )
+                ? _VideoPlayerWidget(url: cctvUrl)
                 : Container(
                     color: kDarkBrown,
                     child: Center(
@@ -765,6 +1026,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
           ],
         ),
+
         SizedBox(height: 6),
         Row(
           children: [
@@ -814,7 +1076,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         ),
                       ],
                     ),
-                    GestureDetector(
+                    PressableButton(
                       onTap: () async {
                         if (!hiveIsAutoMode) {
                           final ip =
@@ -962,7 +1224,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ),
                 ),
                 SizedBox(width: 6),
-                GestureDetector(
+                PressableButton(
                   onTap: () => _showAllLogs(hive),
                   child: Container(
                     padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1007,39 +1269,81 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 )
               : Column(
                   children: logs.reversed.take(5).map((log) {
-                    return Padding(
-                      padding: EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 4,
-                                height: 4,
-                                decoration: BoxDecoration(
-                                  color: kRed,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              SizedBox(width: 6),
-                              Text(
-                                _formatLogTime(log['time']),
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: kDarkBrown,
-                                ),
-                              ),
-                            ],
+                    return PressableButton(
+                      onTap: () async {
+                        final hiveId = hive['id'].toString();
+                        final seq = log['prediction_seq']?.toString();
+                        if (seq == null) return;
+
+                        // 로딩 표시
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (_) => Center(
+                            child: CircularProgressIndicator(color: kGold),
                           ),
-                          Text(
-                            '탐지율 : ${(log['confidence'] * 100).toStringAsFixed(0)}%',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Color(0xFFE57373),
+                        );
+
+                        final imageUrl = await ApiService()
+                            .getPredictionImageUrl(
+                              deviceId: hiveId,
+                              predictionSeq: seq,
+                            );
+
+                        if (!mounted) return;
+                        Navigator.pop(context); // 로딩 닫기
+
+                        setState(() {
+                          hive['predictionImageUrl'] = imageUrl ?? '';
+                          hive['lastDetected'] = log['time'];
+                          hive['confidence'] = log['confidence'];
+                          _showLogDetail = true;
+                        });
+                      },
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 4,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: kRed,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                SizedBox(width: 6),
+                                Text(
+                                  _formatLogTime(log['time']),
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: kDarkBrown,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                        ],
+                            Row(
+                              children: [
+                                Text(
+                                  '탐지율 : ${(log['confidence'] * 100).toStringAsFixed(0)}%',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Color(0xFFE57373),
+                                  ),
+                                ),
+                                SizedBox(width: 4),
+                                Icon(
+                                  Icons.chevron_right,
+                                  size: 14,
+                                  color: kMutedGold,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     );
                   }).toList(),
@@ -1050,6 +1354,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _showAllLogs(Map<String, dynamic> hive) async {
+    final rootContext = context;
     // 서버에서 전체 기록 불러오기
     final allLogs = await ApiService().getPredictions(hive['id'].toString());
 
@@ -1103,39 +1408,83 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         Divider(height: 1, color: kLightBorder),
                     itemBuilder: (_, i) {
                       final log = allLogs[allLogs.length - 1 - i];
-                      return Padding(
-                        padding: EdgeInsets.symmetric(vertical: 10),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  width: 4,
-                                  height: 4,
-                                  decoration: BoxDecoration(
-                                    color: kRed,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                SizedBox(width: 8),
-                                Text(
-                                  _formatLogTime(log['time']),
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: kDarkBrown,
-                                  ),
-                                ),
-                              ],
+                      return PressableButton(
+                        onTap: () async {
+                          final hiveId = hive['id'].toString();
+                          final seq = log['prediction_seq']?.toString();
+                          if (seq == null) return;
+
+                          Navigator.pop(rootContext); // bottomSheet 닫기
+
+                          // 로딩 표시
+                          showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (_) => Center(
+                              child: CircularProgressIndicator(color: kGold),
                             ),
-                            Text(
-                              '탐지율 ${(log['confidence'] * 100).toStringAsFixed(0)}%',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Color(0xFFE57373),
+                          );
+
+                          final imageUrl = await ApiService()
+                              .getPredictionImageUrl(
+                                deviceId: hiveId,
+                                predictionSeq: seq,
+                              );
+
+                          if (!mounted) return;
+                          Navigator.pop(rootContext); // 로딩 닫기
+
+                          setState(() {
+                            hive['predictionImageUrl'] = imageUrl ?? '';
+                            hive['lastDetected'] = log['time'];
+                            hive['confidence'] = log['confidence'];
+                            _showLogDetail = true;
+                          });
+                        },
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 10),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 4,
+                                    height: 4,
+                                    decoration: BoxDecoration(
+                                      color: kRed,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    _formatLogTime(log['time']),
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: kDarkBrown,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                          ],
+                              Row(
+                                children: [
+                                  Text(
+                                    '탐지율 ${(log['confidence'] * 100).toStringAsFixed(0)}%',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Color(0xFFE57373),
+                                    ),
+                                  ),
+                                  SizedBox(width: 4),
+                                  Icon(
+                                    Icons.chevron_right,
+                                    size: 14,
+                                    color: kMutedGold,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     },
@@ -1146,12 +1495,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  Future<void> _saveCctvUrls() async {
+    final prefs = await SharedPreferences.getInstance();
+    for (final group in _groups) {
+      print('저장: ${group['name']} → ${group['cctvUrl']}'); // ← 추가
+
+      prefs.setString('cctvUrl_${group['name']}', group['cctvUrl'] ?? '');
+    }
+  }
+
+  Future<void> _loadCctvUrls() async {
+    final prefs = await SharedPreferences.getInstance();
+    for (final group in _groups) {
+      final saved = prefs.getString('cctvUrl_${group['name']}') ?? '';
+      print('불러오기: ${group['name']} → $saved'); // ← 추가
+
+      group['cctvUrl'] = saved;
+    }
+  }
+
   Widget _buildAlertBanner(Map<String, dynamic> hive) {
     return Positioned(
       top: 0,
       left: 0,
       right: 0,
-      child: GestureDetector(
+      child: PressableButton(
         onTap: () {
           setState(() {
             _showDetailScreen = true;
@@ -1228,7 +1596,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                GestureDetector(
+                PressableButton(
                   onTap: () => setState(() => _showDetailScreen = false),
                   child: Container(
                     width: 32,
@@ -1280,59 +1648,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: kLightRed,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Color(0xFFFFCDD2), width: 0.5),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '감지 시각',
-                              style: TextStyle(fontSize: 11, color: kMutedGold),
-                            ),
-                            SizedBox(height: 2),
-                            Text(
-                              hive['lastDetected'] != null
-                                  ? _formatLogTime(hive['lastDetected'])
-                                  : '-',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                color: kRed,
-                              ),
-                            ),
-                          ],
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              '신뢰도',
-                              style: TextStyle(fontSize: 11, color: kMutedGold),
-                            ),
-                            SizedBox(height: 2),
-                            Text(
-                              '${(hive['confidence'] * 100).toStringAsFixed(0)}%',
-                              style: TextStyle(
-                                fontSize: 24,
-                                fontWeight: FontWeight.w500,
-                                color: kRed,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(height: 14),
-                  _graphLabel('AI 분석 이미지'),
+                  _graphLabel('AI 탐지 결과'),
                   SizedBox(height: 6),
                   (hive['predictionImageUrl'] as String? ?? '').isNotEmpty
                       ? ClipRRect(
@@ -1396,7 +1712,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               color: kCream,
               border: Border(top: BorderSide(color: kLightBorder, width: 0.5)),
             ),
-            child: _PressableButton(
+            child: PressableButton(
               onTap: () {
                 setState(() {
                   final hives = _groups[_selectedGroupIndex]['hives'] as List;
@@ -1430,8 +1746,112 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
             ),
           ),
+          SizedBox(height: 14),
+          _graphLabel('세부 결과 (RMS / FFT / Spectrogram)'),
+          SizedBox(height: 6),
         ],
       ),
+    );
+  }
+
+  Widget _buildLogDetailScreen() {
+    final hive = _currentHive;
+    if (hive == null) return _buildMainScreen();
+
+    return Column(
+      children: [
+        Container(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: kCream,
+            border: Border(bottom: BorderSide(color: kLightBorder, width: 0.5)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween, // ← 변경
+            children: [
+              PressableButton(
+                onTap: () => setState(() => _showLogDetail = false),
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: Color(0xFFF0EBE0),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: kLightBorder, width: 0.5),
+                  ),
+                  child: Icon(
+                    Icons.arrow_back_ios,
+                    size: 14,
+                    color: kMutedGold,
+                  ),
+                ),
+              ),
+              Text(
+                // ← 추가
+                'AI 분석 결과',
+                style: TextStyle(
+                  fontFamily: 'Georgia',
+                  fontSize: 16,
+                  letterSpacing: 1,
+                  color: kDarkBrown,
+                  fontWeight: FontWeight.normal,
+                ),
+              ),
+              SizedBox(width: 32), // ← 균형 맞추기
+            ],
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.all(14),
+            child: (hive['predictionImageUrl'] as String? ?? '').isNotEmpty
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.network(
+                      hive['predictionImageUrl'],
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, progress) {
+                        if (progress == null) return child;
+                        return Container(
+                          height: 300,
+                          color: kDarkBrown,
+                          child: Center(
+                            child: CircularProgressIndicator(color: kGold),
+                          ),
+                        );
+                      },
+                      errorBuilder: (context, error, stack) => Container(
+                        height: 300,
+                        decoration: BoxDecoration(
+                          color: kDarkBrown,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Center(
+                          child: Text(
+                            '이미지를 불러올 수 없어요',
+                            style: TextStyle(color: kMutedGold),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : Container(
+                    height: 300,
+                    decoration: BoxDecoration(
+                      color: kDarkBrown,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Center(
+                      child: Text(
+                        '분석 이미지 없음',
+                        style: TextStyle(color: kMutedGold),
+                      ),
+                    ),
+                  ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1439,6 +1859,68 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return Text(
       label,
       style: TextStyle(fontSize: 12, color: kMutedGold, letterSpacing: 1.5),
+    );
+  }
+}
+
+class _VideoPlayerWidget extends StatefulWidget {
+  final String url;
+  const _VideoPlayerWidget({required this.url});
+
+  @override
+  State<_VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
+}
+
+class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
+  late VideoPlayerController _controller;
+  bool _initialized = false;
+  @override
+  void initState() {
+    super.initState();
+    print('재생 시도 URL: ${widget.url}'); // ← 추가
+    _controller =
+        VideoPlayerController.networkUrl(
+            Uri.parse(widget.url),
+            httpHeaders: {'Connection': 'keep-alive'},
+          )
+          ..initialize()
+              .then((_) {
+                print('비디오 초기화 성공!');
+                setState(() => _initialized = true);
+                _controller.setLooping(true);
+                _controller.play();
+              })
+              .catchError((e) {
+                print('비디오 초기화 실패: $e'); // ← 추가
+                print('실패 URL: ${widget.url}');  // ← 추가
+              });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_initialized) {
+      return Container(
+        color: const Color(0xFF1C1207),
+        child: const Center(
+          child: CircularProgressIndicator(color: Color(0xFFE8A820)),
+        ),
+      );
+    }
+    return SizedBox.expand(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        child: SizedBox(
+          width: _controller.value.size.width,
+          height: _controller.value.size.height,
+          child: VideoPlayer(_controller),
+        ),
+      ),
     );
   }
 }
@@ -1473,35 +1955,4 @@ class HexLogoPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_) => false;
-}
-
-class _PressableButton extends StatefulWidget {
-  final Widget child;
-  final VoidCallback? onTap;
-
-  const _PressableButton({required this.child, this.onTap});
-
-  @override
-  State<_PressableButton> createState() => _PressableButtonState();
-}
-
-class _PressableButtonState extends State<_PressableButton> {
-  double _scale = 1.0;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) => setState(() => _scale = 0.95),
-      onTapUp: (_) {
-        setState(() => _scale = 1.0);
-        widget.onTap?.call();
-      },
-      onTapCancel: () => setState(() => _scale = 1.0),
-      child: AnimatedScale(
-        scale: _scale,
-        duration: Duration(milliseconds: 80),
-        child: widget.child,
-      ),
-    );
-  }
 }
